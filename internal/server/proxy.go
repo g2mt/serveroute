@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -19,26 +18,18 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, target str
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(url)
+	proxy := httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(url)
+			pr.Out.Host = "localhost"
+			pr.Out.Header.Set("X-Real-IP", r.RemoteAddr)
 
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-
-		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-		req.Header.Set("Host", "localhost")
-		if prior := req.Header.Get("X-Forwarded-For"); prior != "" {
-			clientIP = prior + ", " + clientIP
-		}
-		req.Header.Set("X-Forwarded-For", clientIP)
-		req.Header.Set("X-Real-IP", r.RemoteAddr)
-
-		if r.TLS != nil {
-			req.Header.Set("X-Forwarded-Proto", "https")
-		} else {
-			req.Header.Set("X-Forwarded-Proto", "http")
-		}
+			if r.TLS != nil {
+				pr.Out.Header.Set("X-Forwarded-Proto", "https")
+			} else {
+				pr.Out.Header.Set("X-Forwarded-Proto", "http")
+			}
+		},
 	}
-
 	proxy.ServeHTTP(w, r)
 }
