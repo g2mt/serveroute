@@ -1,4 +1,4 @@
-# serveproxy
+# serveroute
 
 A lightweight reverse proxy server written in Go.
 
