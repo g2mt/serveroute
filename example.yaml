@@ -23,6 +23,10 @@ alt_hosts: # optional, if specified and client sends a matching Host header, the
       reconnect: true # defaults to true. if true then the ssh process will automatically restart if it is closed
       insecure_skip_verify_tls: false # if true then the tls proxy will skip certifcate verification
 
+on_event:
+  start: ["notify-send", "$<SERVICE> started"]
+  stop: ["notify-send", "$<SERVICE> stopped"]
+
 services:
   main:
     subdomain: "" # empty for zero subdomain
