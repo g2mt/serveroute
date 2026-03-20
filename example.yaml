@@ -23,6 +23,9 @@ alt_hosts: # optional, if specified and client sends a matching Host header, the
       reconnect: true # defaults to true. if true then the ssh process will automatically restart if it is closed
       insecure_skip_verify_tls: false # if true then the tls proxy will skip certifcate verification
 
+# on_event: runs shell commands when events occur. Available events are "start" and "stop".
+# Commands support string replacements: $<TYPE> (event type) and $<SERVICE> (service name).
+# Use ["command", "arg1", "arg2"] format for the command and its arguments.
 on_event:
   start: ["notify-send", "$<SERVICE> started"]
   stop: ["notify-send", "$<SERVICE> stopped"]
