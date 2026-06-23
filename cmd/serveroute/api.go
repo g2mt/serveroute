@@ -58,8 +58,8 @@ type svcInfo struct {
 // svcInfo builds an svcInfo for a single service config.
 func (h *handler) svcInfo(svc *config.ServiceConfig) svcInfo {
 	info := svcInfo{Stoppable: svc.IsStoppable()}
-	if svc.Service != "" {
-		if state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus()); err == nil {
+	if svc.Unit != "" {
+		if state, err := h.systemdMgr.State(svc.Unit, svc.UseUserBus()); err == nil {
 			info.Active = state == "active"
 		}
 	}
@@ -98,16 +98,16 @@ func (h *handler) apiGetOne(w http.ResponseWriter, r *http.Request, svc *config.
 
 // apiActive handles GET/POST /{svc}/active.
 func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.ServiceConfig) {
-	if svc.Service == "" {
+	if svc.Unit == "" {
 		http.Error(w, "service has no systemd unit", http.StatusBadRequest)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, svc.UseUserBus())
 		if err != nil {
-			log.Printf("state %s: %v", svc.Service, err)
+			log.Printf("state %s: %v", svc.Unit, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -124,8 +124,8 @@ func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.
 		}
 
 		if body.Active {
-			if err := h.systemdMgr.Start(svc.Service, svc.UseUserBus()); err != nil {
-				log.Printf("start %s: %v", svc.Service, err)
+			if err := h.systemdMgr.Start(svc.Unit, svc.UseUserBus()); err != nil {
+				log.Printf("start %s: %v", svc.Unit, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -134,15 +134,15 @@ func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.
 				http.Error(w, "service is not stoppable", http.StatusBadRequest)
 				return
 			}
-			if err := h.systemdMgr.Stop(svc.Service, svc.UseUserBus()); err != nil {
-				log.Printf("stop %s: %v", svc.Service, err)
+			if err := h.systemdMgr.Stop(svc.Unit, svc.UseUserBus()); err != nil {
+				log.Printf("stop %s: %v", svc.Unit, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
 
 		// Return the resulting state.
-		state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, svc.UseUserBus())
 		active := body.Active
 		if err == nil {
 			active = state == "active"

@@ -30,7 +30,7 @@ hosts:
         hidden: true
         stoppable: false
       "example":
-        service: example # use libsystemd to start/stop the `example` service
+        unit: example # use libsystemd to start/stop the `example` service
         user: true # defaults to true, use the current user's systemd instance instead of the root
         stops_after: 1800 # stops the service if last packet sent to `example.main.local` was more than 1800 seconds ago
         forwards_to: "http://localhost:10240"

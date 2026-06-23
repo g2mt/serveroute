@@ -121,7 +121,7 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 	for host, svcs := range compiled.ServiceIndex {
 		m := make(map[string]*serviceState)
 		for sub, svc := range svcs {
-			if svc.Service != "" {
+			if svc.Unit != "" {
 				ss := &serviceState{cfg: svc}
 				ss.lastSeen.Store(time.Now().Unix())
 				if svc.ForwardsTo != "" {
@@ -276,17 +276,17 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 	case svc.API:
 		h.serveAPI(w, r, host)
 
-	case svc.Service != "":
+	case svc.Unit != "":
 		// Ensure systemd unit is active.
-		state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, svc.UseUserBus())
 		if err != nil {
-			log.Printf("state %s: %v", svc.Service, err)
+			log.Printf("state %s: %v", svc.Unit, err)
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 			return
 		}
 		if state != "active" && state != "activating" {
-			if err := h.systemdMgr.Start(svc.Service, svc.UseUserBus()); err != nil {
-				log.Printf("start %s: %v", svc.Service, err)
+			if err := h.systemdMgr.Start(svc.Unit, svc.UseUserBus()); err != nil {
+				log.Printf("start %s: %v", svc.Unit, err)
 				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 				return
 			}
@@ -331,13 +331,13 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *systemd.Manager
 				}
 				lastSeen := ss.lastSeen.Load()
 				if now-lastSeen >= int64(stopsAfter.Seconds()) {
-					state, err := mgr.State(ss.cfg.Service, ss.cfg.UseUserBus())
+					state, err := mgr.State(ss.cfg.Unit, ss.cfg.UseUserBus())
 					if err != nil {
 						continue
 					}
 					if state == "active" || state == "activating" {
-						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Service, now-lastSeen)
-						mgr.Stop(ss.cfg.Service, ss.cfg.UseUserBus())
+						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Unit, now-lastSeen)
+						mgr.Stop(ss.cfg.Unit, ss.cfg.UseUserBus())
 					}
 				}
 			}

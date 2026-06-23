@@ -48,8 +48,8 @@ type ServiceConfig struct {
 	Stoppable *bool `yaml:"stoppable"`
 	// API enables built-in API handlers for this subdomain.
 	API bool `yaml:"api"`
-	// Service names the systemd unit to control.
-	Service string `yaml:"service"`
+	// Unit names the systemd unit to control.
+	Unit string `yaml:"unit"`
 	// User selects the user systemd bus instead of system bus. Default true.
 	User *bool `yaml:"user"`
 	// StopsAfter is the idle timeout in seconds before stopping the unit.
@@ -161,9 +161,9 @@ func Compile(cfg *Config) (*Compiled, error) {
 			if subdomain == "" {
 				subdomain = svcKey
 			}
-			// Correct systemd service suffixes
-			if svc.Service != "" {
-				svc.Service = systemd.EnsureSuffix(svc.Service)
+			// Correct systemd unit suffixes
+			if svc.Unit != "" {
+				svc.Unit = systemd.EnsureSuffix(svc.Unit)
 			}
 			// Copy to avoid aliasing loop variable.
 			sc := svc
