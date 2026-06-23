@@ -14,10 +14,21 @@ func TestHostRegex(t *testing.T) {
 	}{
 		{
 			template: "${subdomain}${host}.local",
+			header:   "apimain.local",
+			wantOK:   true,
+			wantHost: "apimain",
+		},
+		{
+			template: "${subdomain}${host}.local",
 			header:   "api.main.local",
 			wantOK:   true,
 			wantSub:  "api",
 			wantHost: "main",
+		},
+		{
+			template: "${subdomain}${host}.local",
+			header:   "nested.api.main.local",
+			wantOK:   false,
 		},
 		{
 			template: "${subdomain}${host}.local",
