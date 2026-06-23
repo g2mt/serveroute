@@ -18,8 +18,26 @@ One `http.ServeMux`-equivalent, one handler function. It does, in order:
 
 1. **allow-list**: compare `r.RemoteAddr`'s IP against `allow` (a `[]netip.Prefix`).
    Reject → `403`. No separate listener wrapper.
-2. **parse Host**: strip port, match against `domain_template` to split
-   `subdomain` and `host`. One regex, compiled once.
+2. **parse Host**: strip the `:port` suffix from the `Host` header (lower-cased;
+   `net.SplitHostPort` with a fallback when no port is present), then match the
+   remainder against `domain_template` to extract two named fields,
+   `subdomain` and `host`.
+
+   `domain_template` is a literal template with two placeholders, e.g.
+   `{subdomain}.{host}.example.com`. At config load it is compiled **once** into
+   a single `*regexp.Regexp` by escaping every literal byte and replacing each
+   placeholder with a named capture group over `[^.]+`:
+
+   ```
+   {subdomain}.{host}.example.com  ->  ^(?P<subdomain>[^.]+)\.(?P<host>[^.]+)\.example\.com$
+   ```
+
+   The compiled regex is anchored (`^...$`) so a non-match is a hard `404` (no
+   fall-through, no wildcard). On a match the handler reads `subdomain` and
+   `host` from the named groups; everything downstream (`os.Hostname()`
+   comparison, `services[subdomain]` lookup) is plain map/index work on those
+   two strings. Unknown subdomains resolve to an empty service entry and are
+   handled by the dispatch switch as `404`.
 3. **dispatch** (one `switch`):
    - `host` is remote (`!= os.Hostname()`) → call `sshTunnels.Get(host)` and
      `httputil.ReverseProxy` to its local port, preserving `Host`.
