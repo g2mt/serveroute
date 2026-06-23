@@ -82,6 +82,8 @@ type Compiled struct {
 	HTTPPort  int // local HTTP port, extracted from listen address
 	AllowNets []netip.Prefix
 	// ServiceIndex maps host -> subdomain -> *ServiceConfig.
+	// A single systemd unit may appear under multiple subdomains or hosts;
+	// the watcher tolerates duplicate Add calls for the same unit name.
 	ServiceIndex map[string]map[string]*ServiceConfig
 	// HostPorts maps host -> its HTTP listen port (from shared config).
 	HostPorts map[string]int

@@ -67,9 +67,10 @@ static uint64_t do_now_usec(void) {
 // do_process_event drains one pending bus message and, if it is a
 // PropertiesChanged signal for ActiveState on org.freedesktop.systemd1.Unit,
 // extracts the unit path and state string.
-// Returns 1 with *path_out and *state_out set (caller must free both),
-// 0 when the message was consumed but not relevant (caller should loop),
-// or -1 on error.
+// Returns  2 with *path_out and *state_out set (caller must free both),
+//          1 when a message was consumed but not relevant (caller should loop),
+//          0 when no message is available (caller should retry later),
+//         <0 on error.
 static int do_process_event(sd_bus *bus, char **path_out, char **state_out) {
 	sd_bus_message *m = NULL;
 	int r = sd_bus_process(bus, &m);
@@ -102,7 +103,7 @@ static int do_process_event(sd_bus *bus, char **path_out, char **state_out) {
 				sd_bus_message_exit_container(m);
 				sd_bus_message_exit_container(m);
 				sd_bus_message_unref(m);
-				return 1;
+				return 2;
 			}
 		} else {
 			sd_bus_message_skip(m, "v");
@@ -113,7 +114,7 @@ static int do_process_event(sd_bus *bus, char **path_out, char **state_out) {
 
 skip:
 	sd_bus_message_unref(m);
-	return 0;
+	return 1;
 }
 */
 import "C"
@@ -142,11 +143,16 @@ type Watcher struct {
 	done   chan struct{}
 	once   sync.Once
 
-	mu         sync.Mutex
-	pathToName map[string]string // D-Bus path -> unit name
+	mu          sync.Mutex
+	pathToState map[string]*pathState // D-Bus path -> unit + last seen active state
 
 	subsMu      sync.RWMutex
 	subscribers map[chan Event]struct{}
+}
+
+type pathState struct {
+	unit   string
+	active bool
 }
 
 // NewWatcher creates a new Watcher. Call Add to register units, then Start.
@@ -156,7 +162,7 @@ func NewWatcher() *Watcher {
 		shutdownFd:  fd,
 		events:      make(chan Event, 64),
 		done:        make(chan struct{}),
-		pathToName:  make(map[string]string),
+		pathToState:  make(map[string]*pathState),
 		subscribers: make(map[chan Event]struct{}),
 	}
 }
@@ -174,7 +180,7 @@ func (w *Watcher) Add(unitName string, useUser bool) error {
 		return fmt.Errorf("encode path for %s failed", unitName)
 	}
 	path := C.GoString(cPath)
-	w.pathToName[path] = unitName
+	w.pathToState[path] = &pathState{unit: unitName}
 
 	// Open the appropriate bus lazily and add the match.
 	if useUser {
@@ -361,7 +367,10 @@ func (w *Watcher) watchBus(bus *C.sd_bus) error {
 				return err
 			}
 			if r == 0 {
-				break // queue empty
+				break // no messages available
+			}
+			if r == 1 {
+				continue // irrelevant message consumed, keep draining
 			}
 
 			path := C.GoString(cPath)
@@ -370,14 +379,23 @@ func (w *Watcher) watchBus(bus *C.sd_bus) error {
 			C.free(unsafe.Pointer(cState))
 
 			w.mu.Lock()
-			name := w.pathToName[path]
+			ps := w.pathToState[path]
+			if ps == nil {
+				w.mu.Unlock()
+				continue
+			}
+			active := state == "active"
+			if active == ps.active {
+				w.mu.Unlock()
+				continue // no state change, skip
+			}
+			ps.active = active
+			unit := ps.unit
 			w.mu.Unlock()
 
-			if name != "" {
-				select {
-				case w.events <- Event{Service: name, Active: state == "active"}:
-				default:
-				}
+			select {
+			case w.events <- Event{Service: unit, Active: active}:
+			default:
 			}
 		}
 
