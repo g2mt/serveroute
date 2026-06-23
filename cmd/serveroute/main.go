@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -305,36 +304,6 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 	default:
 		http.Error(w, "404 Not Found", http.StatusNotFound)
 	}
-}
-
-// serveAPI handles the built-in API endpoints for a host.
-func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, host string) {
-	// Simple API: list services and their statuses.
-	svcs := h.compiled.ServiceIndex[host]
-	type serviceInfo struct {
-		Active    bool `json:"active"`
-		Stoppable bool `json:"stoppable"`
-	}
-	result := make(map[string]serviceInfo)
-	for sub, svc := range svcs {
-		if svc.Hidden {
-			continue
-		}
-		info := serviceInfo{
-			Stoppable: svc.IsStoppable(),
-		}
-		if svc.Service != "" {
-			state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus())
-			if err != nil {
-				log.Printf("error obtaining state for %s: %v", svc.Service, err)
-			} else {
-				info.Active = state == "active"
-			}
-		}
-		result[sub] = info
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
 }
 
 func (h *handler) lookupState(host, subdomain string) *serviceState {
