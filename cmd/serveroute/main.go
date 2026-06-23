@@ -54,8 +54,11 @@ func main() {
 	systemdMgr := systemd.NewManager()
 	tunnelMgr := sshtunnels.NewManager(cfg.StartPort)
 
+	// Build watcher for SSE state-change streaming.
+	watcher := buildWatcher(compiled)
+
 	// Build the handler.
-	handler := newHandler(compiled, states, systemdMgr, tunnelMgr)
+	handler := newHandler(compiled, states, systemdMgr, tunnelMgr, watcher)
 
 	// Start idle reaper.
 	go idleReaper(states, systemdMgr)
@@ -109,6 +112,7 @@ func main() {
 		httpsServer.Shutdown(ctx)
 	}
 
+	watcher.Shutdown()
 	tunnelMgr.Shutdown()
 	systemdMgr.Shutdown()
 
@@ -153,16 +157,19 @@ type handler struct {
 	states     map[string]map[string]*serviceState
 	systemdMgr *systemd.Manager
 	tunnelMgr  *sshtunnels.Manager
+	watcher    *systemd.Watcher
 }
 
 func newHandler(compiled *config.Compiled, states map[string]map[string]*serviceState,
-	systemdMgr *systemd.Manager, tunnelMgr *sshtunnels.Manager) *handler {
+	systemdMgr *systemd.Manager, tunnelMgr *sshtunnels.Manager,
+	watcher *systemd.Watcher) *handler {
 
 	return &handler{
 		compiled:   compiled,
 		states:     states,
 		systemdMgr: systemdMgr,
 		tunnelMgr:  tunnelMgr,
+		watcher:    watcher,
 	}
 }
 
@@ -278,14 +285,14 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 
 	case svc.Unit != "":
 		// Ensure systemd unit is active.
-		state, err := h.systemdMgr.State(svc.Unit, svc.UseUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, svc.UsesUserBus())
 		if err != nil {
 			log.Printf("state %s: %v", svc.Unit, err)
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 			return
 		}
 		if state != "active" && state != "activating" {
-			if err := h.systemdMgr.Start(svc.Unit, svc.UseUserBus()); err != nil {
+			if err := h.systemdMgr.Start(svc.Unit, svc.UsesUserBus()); err != nil {
 				log.Printf("start %s: %v", svc.Unit, err)
 				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 				return
@@ -331,13 +338,13 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *systemd.Manager
 				}
 				lastSeen := ss.lastSeen.Load()
 				if now-lastSeen >= int64(stopsAfter.Seconds()) {
-					state, err := mgr.State(ss.cfg.Unit, ss.cfg.UseUserBus())
+					state, err := mgr.State(ss.cfg.Unit, ss.cfg.UsesUserBus())
 					if err != nil {
 						continue
 					}
 					if state == "active" || state == "activating" {
 						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Unit, now-lastSeen)
-						mgr.Stop(ss.cfg.Unit, ss.cfg.UseUserBus())
+						mgr.Stop(ss.cfg.Unit, ss.cfg.UsesUserBus())
 					}
 				}
 			}

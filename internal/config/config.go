@@ -66,8 +66,8 @@ func (s ServiceConfig) IsStoppable() bool {
 	return *s.Stoppable
 }
 
-// UseUserBus returns true unless explicitly set to false.
-func (s ServiceConfig) UseUserBus() bool {
+// UsesUserBus returns true unless explicitly set to false.
+func (s ServiceConfig) UsesUserBus() bool {
 	if s.User == nil {
 		return true
 	}
