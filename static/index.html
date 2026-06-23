@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Serveroute Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <h1>Serveroute</h1>
+  <p class="subtitle">Service overview &amp; control</p>
+
+  <div class="status-bar">
+    <span class="status-dot" id="connDot"></span>
+    <span id="connLabel">Loading…</span>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Service name</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="servicesBody">
+        <!-- rows injected by JS -->
+      </tbody>
+    </table>
+    <div id="emptyMsg" class="empty-message hidden">No services found.</div>
+    <div id="errorMsg" class="error-message hidden"></div>
+  </div>
+
+  <script type="module">
+    import Serveroute from './js/serveroute.js';
+
+    /* ─── DOM refs ─────────────────────────── */
+    const tbody      = document.getElementById('servicesBody');
+    const emptyMsg   = document.getElementById('emptyMsg');
+    const errorMsg   = document.getElementById('errorMsg');
+    const connDot    = document.getElementById('connDot');
+    const connLabel  = document.getElementById('connLabel');
+
+    /* ─── state ────────────────────────────── */
+    const api = new Serveroute();
+    let services = {};       // name → {active, stoppable}
+    let inFlight = new Set(); // service names currently being toggled
+
+    /* ─── helpers ──────────────────────────── */
+
+    function setConnState(state) {
+      connDot.className = 'status-dot';
+      if (state === 'connected') {
+        connDot.classList.add('connected');
+        connLabel.textContent = 'Connected';
+      } else if (state === 'disconnected') {
+        connDot.classList.add('disconnected');
+        connLabel.textContent = 'Disconnected';
+      } else if (state === 'error') {
+        connDot.classList.add('error');
+        connLabel.textContent = 'Connection error';
+      } else {
+        connLabel.textContent = 'Loading…';
+      }
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.classList.remove('hidden');
+      emptyMsg.classList.add('hidden');
+      tbody.innerHTML = '';
+    }
+
+    function clearError() {
+      errorMsg.classList.add('hidden');
+      errorMsg.textContent = '';
+    }
+
+    /* ─── render table ─────────────────────── */
+
+    function render() {
+      clearError();
+      const names = Object.keys(services);
+
+      if (names.length === 0) {
+        tbody.innerHTML = '';
+        emptyMsg.classList.remove('hidden');
+        return;
+      }
+      emptyMsg.classList.add('hidden');
+
+      let html = '';
+      for (const name of names) {
+        const svc = services[name];
+        const isActive = svc.active;
+        const busy = inFlight.has(name);
+        const dotClass = isActive ? 'active' : 'inactive';
+        let linkHtml;
+
+        if (busy) {
+          linkHtml = '<span class="spinner"></span>';
+        } else if (svc.stoppable) {
+          if (isActive) {
+            linkHtml = `<button class="action-link stop" data-name="${name}" data-action="stop">Stop</button>`;
+          } else {
+            linkHtml = `<button class="action-link start" data-name="${name}" data-action="start">Start</button>`;
+          }
+        } else {
+          linkHtml = `<span style="color:#9ca3af;font-size:0.82rem;">—</span>`;
+        }
+
+        html += `<tr>
+          <td class="service-name">${escHtml(name)}</td>
+          <td>
+            <div class="service-status">
+              <span class="service-dot ${dotClass}"></span>
+              ${linkHtml}
+            </div>
+          </td>
+        </tr>`;
+      }
+      tbody.innerHTML = html;
+    }
+
+    /* ─── mild XSS protection ──────────────── */
+
+    function escHtml(str) {
+      const div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+
+    /* ─── load services ────────────────────── */
+
+    async function loadServices() {
+      setConnState('loading');
+      try {
+        services = await api.list();
+        setConnState('connected');
+        render();
+      } catch (err) {
+        console.error('Failed to load services:', err);
+        setConnState('error');
+        showError(`Failed to load services: ${err.message}`);
+      }
+    }
+
+    /* ─── toggle a service ─────────────────── */
+
+    async function toggleService(name, activate) {
+      if (inFlight.has(name)) return;
+      inFlight.add(name);
+      render(); // show spinner
+
+      try {
+        const newActive = await api.setActive(name, activate);
+        services[name].active = newActive;
+      } catch (err) {
+        console.error(`Failed to toggle ${name}:`, err);
+        // revert optimistic state on error, or just keep old
+      } finally {
+        inFlight.delete(name);
+        render();
+      }
+    }
+
+    /* ─── click delegation for action buttons ── */
+
+    tbody.addEventListener('click', (e) => {
+      const btn = e.target.closest('.action-link');
+      if (!btn) return;
+      e.preventDefault();
+      const name   = btn.dataset.name;
+      const action = btn.dataset.action; // 'start' or 'stop'
+      const activate = action === 'start';
+      toggleService(name, activate);
+    });
+
+    /* ─── SSE live updates ──────────────────── */
+
+    let watcher = null;
+
+    function startWatch() {
+      if (watcher) watcher.close();
+      try {
+        watcher = api.watch((service, active) => {
+          if (services.hasOwnProperty(service)) {
+            services[service].active = active;
+          } else {
+            // new service appeared – reload full list
+            loadServices();
+            return;
+          }
+          render();
+        });
+      } catch (err) {
+        console.warn('SSE watch not available:', err);
+      }
+    }
+
+    /* ─── init ──────────────────────────────── */
+
+    async function init() {
+      await loadServices();
+      if (Object.keys(services).length > 0) {
+        startWatch();
+      }
+    }
+
+    init().catch((err) => {
+      console.error('init error:', err);
+      setConnState('error');
+      showError(`Initialisation error: ${err.message}`);
+    });
+  </script>
+
+</body>
+</html>
