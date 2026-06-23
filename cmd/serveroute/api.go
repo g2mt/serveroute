@@ -61,9 +61,9 @@ type svcInfo struct {
 
 // svcInfo builds an svcInfo for a single service config.
 func (h *handler) svcInfo(svc *config.ServiceConfig) svcInfo {
-	info := svcInfo{Stoppable: svc.IsStoppable()}
+	info := svcInfo{Stoppable: *svc.Stoppable}
 	if svc.Unit != "" {
-		if state, err := h.systemdMgr.State(svc.Unit, svc.UsesUserBus()); err == nil {
+		if state, err := h.systemdMgr.State(svc.Unit, *svc.User); err == nil {
 			info.Active = state == "active"
 		}
 	}
@@ -109,7 +109,7 @@ func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.
 
 	switch r.Method {
 	case http.MethodGet:
-		state, err := h.systemdMgr.State(svc.Unit, svc.UsesUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, *svc.User)
 		if err != nil {
 			log.Printf("state %s: %v", svc.Unit, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -128,17 +128,17 @@ func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.
 		}
 
 		if body.Active {
-			if err := h.systemdMgr.Start(svc.Unit, svc.UsesUserBus()); err != nil {
+			if err := h.systemdMgr.Start(svc.Unit, *svc.User); err != nil {
 				log.Printf("start %s: %v", svc.Unit, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		} else {
-			if !svc.IsStoppable() {
+			if !*svc.Stoppable {
 				http.Error(w, "service is not stoppable", http.StatusBadRequest)
 				return
 			}
-			if err := h.systemdMgr.Stop(svc.Unit, svc.UsesUserBus()); err != nil {
+			if err := h.systemdMgr.Stop(svc.Unit, *svc.User); err != nil {
 				log.Printf("stop %s: %v", svc.Unit, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -146,7 +146,7 @@ func (h *handler) apiActive(w http.ResponseWriter, r *http.Request, svc *config.
 		}
 
 		// Return the resulting state.
-		state, err := h.systemdMgr.State(svc.Unit, svc.UsesUserBus())
+		state, err := h.systemdMgr.State(svc.Unit, *svc.User)
 		active := body.Active
 		if err == nil {
 			active = state == "active"

@@ -59,21 +59,7 @@ type ServiceConfig struct {
 	AllowOrigin string `yaml:"allow_origin"`
 }
 
-// Stoppable returns true unless explicitly set to false.
-func (s ServiceConfig) IsStoppable() bool {
-	if s.Stoppable == nil {
-		return true
-	}
-	return *s.Stoppable
-}
 
-// UsesUserBus returns true unless explicitly set to false.
-func (s ServiceConfig) UsesUserBus() bool {
-	if s.User == nil {
-		return true
-	}
-	return *s.User
-}
 
 // Compiled holds the validated config and pre-computed lookups.
 type Compiled struct {
@@ -86,7 +72,8 @@ type Compiled struct {
 	ServiceIndex map[string]map[string]*ServiceConfig
 }
 
-// Load reads and parses config.yaml from path.
+// Load reads and parses config.yaml from path, setting default values
+// for service-level pointer fields (Stoppable, User default to true).
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -96,6 +83,21 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+
+	// Apply defaults for *bool fields so callers can dereference safely.
+	trueVal := true
+	for _, host := range cfg.Hosts {
+		for k, svc := range host.Services {
+			if svc.Stoppable == nil {
+				svc.Stoppable = &trueVal
+			}
+			if svc.User == nil {
+				svc.User = &trueVal
+			}
+			host.Services[k] = svc
+		}
+	}
+
 	return &cfg, nil
 }
 
