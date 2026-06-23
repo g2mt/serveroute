@@ -314,7 +314,6 @@ func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, host string) 
 	type serviceInfo struct {
 		Subdomain string `json:"subdomain"`
 		Active    string `json:"active,omitempty"`
-		Hidden    bool   `json:"hidden"`
 		Stoppable bool   `json:"stoppable"`
 	}
 	var result []serviceInfo
@@ -324,7 +323,6 @@ func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, host string) 
 		}
 		info := serviceInfo{
 			Subdomain: sub,
-			Hidden:    svc.Hidden,
 			Stoppable: svc.IsStoppable(),
 		}
 		if svc.Service != "" {
@@ -400,4 +398,3 @@ func setProxyHeaders(req *http.Request) {
 	}
 	// X-Forwarded-For is already handled by httputil.ReverseProxy.
 }
-
