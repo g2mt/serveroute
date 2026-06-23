@@ -12,23 +12,6 @@ Dependencies: **Go standard library only**, plus a thin cgo wrapper around
 
 There are exactly four pieces.
 
-```
- +-----------------------+        +------------------+
- |  http.Server          |        |  systemd (cgo)   |
- |  one Handler does:    |        |  Start/Stop/State|
- |   allow-list check    |        |  + idle reaper   |
- |   Host -> route       |        +--------+---------+
- |   static / api / proxy|                 ^
- |   remote -> ssh tunnel|                 |
- +----------+------------+                |
-            |                             |
-            v                             |
- +------------------+   ssh -L :port:host:http   +-------+
- | sshTunnels       | <------------------------> | remote|
- | map[host]*tunnel |                            +-------+
- +------------------+
-```
-
 ### 1. `http.Server` + single `Handler`
 
 One `http.ServeMux`-equivalent, one handler function. It does, in order:
@@ -48,8 +31,13 @@ One `http.ServeMux`-equivalent, one handler function. It does, in order:
        These API handlers are also served when the request reached this host
        through an SSH tunnel — the remote host's handler processes it the same way.
      - `service` → ensure systemd unit active (call `systemd.Start` if needed),
-       update last-seen, `httputil.ReverseProxy` to
-       `127.0.0.1:<start_port + service index>`.
+       update last-seen, `httputil.ReverseProxy` to the service's
+       `forwards_to` URL.
+     The handler also owns **idle reaping**: a `time.Ticker` goroutine walks
+     each systemd service's last-seen timestamp and calls `Stop` when
+     `now - last_seen >= stops_after` and `stoppable`. Last-seen is an
+     `atomic.Int64` per service; the handler updates it on every proxied
+     request.
 
 All routing is a function of the parsed `config.yaml` baked into a lookup table
 at startup. There is no router *type*, just data + a switch.
@@ -61,13 +49,13 @@ channel to keep cgo boundary simple). Exposes:
 
 - `Start(name)`, `Stop(name)`, `State(name)`.
 - Selects system bus vs `--user` bus per service's `user` flag.
-- **Owns idle reaping**: a `time.Ticker` goroutine inside this component walks
-  each systemd service's last-seen timestamp and calls `Stop` when
-  `now - last_seen >= stops_after` and `stoppable`. Last-seen is an
-  `atomic.Int64` per service; the handler updates it on every proxied request.
 
-No IdleTracker component, no PortAllocator component — last-seen is a field on
-the service record; ports are `start_port + index` computed inline.
+This component is purely a thin wrapper around libsystemd for unit lifecycle
+operations. It does **not** track last-seen timestamps or perform idle reaping;
+that responsibility lives in the HTTP handler.
+
+No IdleTracker component — last-seen is a field on the service record managed
+by the handler.
 
 ### 3. `sshTunnels` (a `map[host]*tunnel` + `sync.Mutex`)
 
@@ -88,8 +76,9 @@ removes the entry so the next `Get` re-establishes it. Nothing else.
 ### 4. `config` (load + validate)
 
 The same `config.yaml` is deployed on every host. Each instance parses it
-into structs, computes per-service `start_port + index`, pre-resolves the
-local hostname via `os.Hostname()`, compiles the one domain-template regex.
+into structs, pre-resolves the local hostname via `os.Hostname()`, compiles
+the one domain-template regex. The `forwards_to` field on each service tells
+the handler where to proxy requests.
 Because the config is uniform, the remote HTTP port for each host is known
 locally without out-of-band coordination. Pure data, no behavior.
 
@@ -118,7 +107,7 @@ exit. Systemd units are left in their current state (no forced stop).
 ```
 cmd/serveroute/main.go     // load config, build tables, run http.Server
 internal/config            // parse + validate config.yaml
-internal/systemd           // cgo libsystemd: start/stop/state + reaper
+internal/systemd           // cgo libsystemd: start/stop/state
 internal/sshtunnels         // map[host]*tunnel, lazy ssh -L, restart
 ```
 
