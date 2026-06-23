@@ -188,13 +188,12 @@ func Compile(cfg *Config) (*Compiled, error) {
 func compileTemplate(tmpl string) (*regexp.Regexp, error) {
 	pat := regexp.QuoteMeta(tmpl)
 
-	// Replace escaped placeholders with capture groups.
-	subdomainEsc := regexp.QuoteMeta("${subdomain}")
-	hostEsc := regexp.QuoteMeta("${host}")
-
-	// subdomain is optional: captures non-dot chars followed by a dot, or nothing.
-	pat = strings.ReplaceAll(pat, subdomainEsc, `(?:(?P<subdomain>[^.]+)\.)?`)
-	pat = strings.ReplaceAll(pat, hostEsc, `(?P<host>[^.]+)`)
+	// Replace escaped placeholders with capture groups in one pass.
+	pat = strings.NewReplacer(
+		// subdomain is optional: captures non-dot chars followed by a dot, or nothing.
+		regexp.QuoteMeta("${subdomain}"), `(?:(?P<subdomain>[^.]+)\.)?`,
+		regexp.QuoteMeta("${host}"), `(?P<host>[^.]+)`,
+	).Replace(pat)
 
 	re, err := regexp.Compile(`^` + pat + `$`)
 	if err != nil {
