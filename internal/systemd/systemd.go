@@ -120,6 +120,25 @@ type Manager struct {
 	once      sync.Once
 }
 
+// knownSuffixes lists all valid systemd unit file suffixes.
+var knownSuffixes = []string{
+	"service", "timer", "socket", "mount", "automount",
+	"path", "target", "device", "scope", "slice",
+	"swap", "network", "link", "netdev",
+}
+
+// ensureSuffix appends ".service" to name if it does not already carry a known
+// systemd unit suffix (e.g. ".timer", ".socket", ".service", etc.).
+func EnsureSuffix(name string) string {
+	for _, s := range knownSuffixes {
+		dotSuffix := "." + s
+		if len(name) > len(dotSuffix) && name[len(name)-len(dotSuffix):] == dotSuffix {
+			return name
+		}
+	}
+	return name + ".service"
+}
+
 // NewManager starts the background goroutine that owns the bus connections.
 func NewManager() *Manager {
 	m := &Manager{
@@ -142,7 +161,14 @@ func (m *Manager) Stop(name string, useUser bool) error {
 
 // State returns the ActiveState of a systemd unit.
 func (m *Manager) State(name string, useUser bool) (string, error) {
-	resp := m.doReq(actionState, name, useUser)
+	respChan := make(chan response, 1)
+	m.reqs <- request{
+		action:   actionState,
+		name:     name,
+		useUser:  useUser,
+		respChan: respChan,
+	}
+	resp := <-respChan
 	return resp.state, resp.err
 }
 
@@ -154,11 +180,6 @@ func (m *Manager) Shutdown() {
 }
 
 func (m *Manager) do(a action, name string, useUser bool) error {
-	resp := m.doReq(a, name, useUser)
-	return resp.err
-}
-
-func (m *Manager) doReq(a action, name string, useUser bool) response {
 	respChan := make(chan response, 1)
 	m.reqs <- request{
 		action:   a,
@@ -166,7 +187,8 @@ func (m *Manager) doReq(a action, name string, useUser bool) response {
 		useUser:  useUser,
 		respChan: respChan,
 	}
-	return <-respChan
+	resp := <-respChan
+	return resp.err
 }
 
 func (m *Manager) loop() {

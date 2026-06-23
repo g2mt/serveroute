@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"serveroute/internal/systemd"
 	"strings"
 	"time"
 
@@ -159,6 +160,10 @@ func Compile(cfg *Config) (*Compiled, error) {
 			subdomain := svc.Subdomain
 			if subdomain == "" {
 				subdomain = svcKey
+			}
+			// Correct systemd service suffixes
+			if svc.Service != "" {
+				svc.Service = systemd.EnsureSuffix(svc.Service)
 			}
 			// Copy to avoid aliasing loop variable.
 			sc := svc
