@@ -164,7 +164,13 @@ func newHandler(compiled *config.Compiled, states map[string]map[string]*service
 					log.Printf("invalid forwards_to for %s/%s: %v", host, sub, err)
 					continue
 				}
-				h.proxies[key(host, sub)] = httputil.NewSingleHostReverseProxy(target)
+				rp := &httputil.ReverseProxy{
+					Rewrite: func(pr *httputil.ProxyRequest) {
+						pr.SetURL(target)
+						setProxyHeaders(pr.Out)
+					},
+				}
+				h.proxies[key(host, sub)] = rp
 			}
 		}
 	}
@@ -250,9 +256,14 @@ func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHos
 		return
 	}
 
-	// Build a reverse proxy to the local tunnel endpoint, preserving the Host header.
+	// Build a reverse proxy to the local tunnel endpoint.
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-	rp := httputil.NewSingleHostReverseProxy(target)
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			setProxyHeaders(pr.Out)
+		},
+	}
 	rp.ServeHTTP(w, r)
 }
 
@@ -382,6 +393,27 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *systemd.Manager
 			}
 		}
 	}
+}
+
+// setProxyHeaders adds standard nginx-style proxy headers to the outgoing request.
+func setProxyHeaders(req *http.Request) {
+	// Host → localhost (mimics proxy_set_header Host localhost).
+	req.Host = "localhost"
+
+	// X-Real-IP → client address.
+	clientIP, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		clientIP = req.RemoteAddr
+	}
+	req.Header.Set("X-Real-IP", clientIP)
+
+	// X-Forwarded-Proto → original scheme.
+	if req.TLS != nil {
+		req.Header.Set("X-Forwarded-Proto", "https")
+	} else {
+		req.Header.Set("X-Forwarded-Proto", "http")
+	}
+	// X-Forwarded-For is already handled by httputil.ReverseProxy.
 }
 
 func key(host, subdomain string) string {
