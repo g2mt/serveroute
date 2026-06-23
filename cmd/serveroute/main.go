@@ -280,6 +280,14 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 
 	if svc.AllowOrigin != "" {
 		w.Header().Set("Access-Control-Allow-Origin", svc.AllowOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+	}
+
+	if r.Method == http.MethodOptions && svc.AllowOrigin != "" {
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 
 	switch {
