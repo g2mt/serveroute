@@ -105,6 +105,17 @@ tr:last-child td {
   color: #1a1a2e;
 }
 
+.service-name a {
+  color: #2563eb;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.service-name a:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
 /* ── status column ────────────────────────── */
 
 .service-status {
