@@ -7,19 +7,6 @@ package systemd
 #include <systemd/sd-bus.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-
-static int open_system_bus(sd_bus **bus) {
-	return sd_bus_open_system(bus);
-}
-
-static int open_user_bus(sd_bus **bus) {
-	return sd_bus_default_user(bus);
-}
-
-static void free_bus(sd_bus *bus) {
-	if (bus) sd_bus_unref(bus);
-}
 
 static int do_start_unit(sd_bus *bus, const char *name) {
 	sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -63,47 +50,23 @@ static int do_stop_unit(sd_bus *bus, const char *name) {
 	return 0;
 }
 
-// systemd_escape escapes a unit name for use in a D-Bus object path.
-// Replaces "/" with "-", and if the name starts with "-", prepends "\x2d".
-// Returns a malloc'd string that the caller must free.
-static char *systemd_escape(const char *name) {
-	size_t len = strlen(name);
-	// Worst case: every char is '/' -> same length (we replace / with -)
-	// +1 for null + optional prefix
-	char *escaped = malloc(len + 5);
-	if (!escaped) return NULL;
-
-	size_t j = 0;
-	// If name starts with '-', we need to encode it.
-	// For simplicity, we just handle '/' -> '-'.
-	// systemd also requires encoding of '.' but for unit names it's fine.
-	for (size_t i = 0; i < len; i++) {
-		if (name[i] == '/') {
-			escaped[j++] = '-';
-		} else {
-			escaped[j++] = name[i];
-		}
-	}
-	escaped[j] = '\0';
-	return escaped;
-}
-
+// do_get_state uses sd_bus_path_encode (libsystemd) to build a valid
+// D-Bus object path from the unit name, then fetches ActiveState.
 static int do_get_state(sd_bus *bus, const char *name, char **result) {
 	sd_bus_error error = SD_BUS_ERROR_NULL;
-	char *escaped = systemd_escape(name);
-	if (!escaped) return -ENOMEM;
+	char *path = NULL;
 
-	char path[1024];
-	snprintf(path, sizeof(path), "/org/freedesktop/systemd1/unit/%s", escaped);
-	free(escaped);
+	int r = sd_bus_path_encode("/org/freedesktop/systemd1/unit", name, &path);
+	if (r < 0) return r;
 
-	int r = sd_bus_get_property_string(bus,
+	r = sd_bus_get_property_string(bus,
 		"org.freedesktop.systemd1",
 		path,
 		"org.freedesktop.systemd1.Unit",
 		"ActiveState",
 		&error,
 		result);
+	free(path);
 	if (r < 0) {
 		sd_bus_error_free(&error);
 		return r;
@@ -267,7 +230,7 @@ func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
 	if useUser {
 		if m.userBus == nil {
 			var bus *C.sd_bus
-			r := C.open_user_bus(&bus)
+			r := C.sd_bus_default_user(&bus)
 			if r < 0 {
 				errStr := C.errstr(r)
 				defer C.free(unsafe.Pointer(errStr))
@@ -279,7 +242,7 @@ func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
 	}
 	if m.systemBus == nil {
 		var bus *C.sd_bus
-		r := C.open_system_bus(&bus)
+		r := C.sd_bus_open_system(&bus)
 		if r < 0 {
 			errStr := C.errstr(r)
 			defer C.free(unsafe.Pointer(errStr))
@@ -292,11 +255,11 @@ func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
 
 func (m *Manager) cleanup() {
 	if m.systemBus != nil {
-		C.free_bus(m.systemBus)
+		C.sd_bus_unref(m.systemBus)
 		m.systemBus = nil
 	}
 	if m.userBus != nil {
-		C.free_bus(m.userBus)
+		C.sd_bus_unref(m.userBus)
 		m.userBus = nil
 	}
 }
