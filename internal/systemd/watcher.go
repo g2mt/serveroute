@@ -343,16 +343,11 @@ func (w *Watcher) watchBus(bus *C.sd_bus) error {
 			continue
 		}
 
-		shutdown := false
 		for i := C.int(0); i < nfds; i++ {
 			fd := *(*C.int)(unsafe.Pointer(&events[i].data))
 			if fd == w.shutdownFd {
-				shutdown = true
-				break
+				return nil
 			}
-		}
-		if shutdown {
-			return nil
 		}
 
 		// Drain all pending bus messages.
