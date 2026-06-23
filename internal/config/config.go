@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"os/user"
 	"regexp"
 	"serveroute/internal/systemd"
 	"strings"
@@ -58,8 +59,6 @@ type ServiceConfig struct {
 	// AllowOrigin sets the Access-Control-Allow-Origin header on responses.
 	AllowOrigin string `yaml:"allow_origin"`
 }
-
-
 
 // Compiled holds the validated config and pre-computed lookups.
 type Compiled struct {
@@ -127,7 +126,7 @@ func Compile(cfg *Config) (*Compiled, error) {
 	}
 
 	// Compile domain template into a regex.
-	hostRegex, err := compileTemplate(cfg.DomainTemplate)
+	hostRegex, err := compileDomainTemplate(cfg.DomainTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("compile domain_template: %w", err)
 	}
@@ -143,6 +142,9 @@ func Compile(cfg *Config) (*Compiled, error) {
 		localHost = localHost[:idx]
 	}
 
+	// Build a cached templater for placeholder replacement across all services.
+	templater := newServiceTemplater()
+
 	// Build service index and host port map.
 	serviceIndex := make(map[string]map[string]*ServiceConfig)
 
@@ -153,12 +155,14 @@ func Compile(cfg *Config) (*Compiled, error) {
 			if subdomain == "" {
 				subdomain = svcKey
 			}
-			// Correct systemd unit suffixes
-			if svc.Unit != "" {
-				svc.Unit = systemd.EnsureSuffix(svc.Unit)
-			}
 			// Copy to avoid aliasing loop variable.
 			sc := svc
+			// Apply template placeholders to all string fields.
+			templater.apply(&sc, hostName)
+			// Correct systemd unit suffixes
+			if sc.Unit != "" {
+				sc.Unit = systemd.EnsureSuffix(sc.Unit)
+			}
 			svcMap[subdomain] = &sc
 		}
 		serviceIndex[hostName] = svcMap
@@ -176,9 +180,54 @@ func Compile(cfg *Config) (*Compiled, error) {
 	}, nil
 }
 
-// compileTemplate converts the domain_template string into a regex.
+// serviceTemplater caches system-level values so placeholder replacement
+// across many services doesn't re-query the OS on each call.
+//
+// Placeholders:
+//
+//	%h  – user home directory
+//	%H  – host name of the host being processed
+//	%R  – running machine's hostname
+//	%u  – running user name
+//	%U  – user UID
+type serviceTemplater struct {
+	homeDir  string
+	hostname string
+	username string
+	uid      string
+}
+
+func newServiceTemplater() *serviceTemplater {
+	homeDir, _ := os.UserHomeDir()
+	hostname, _ := os.Hostname()
+	currentUser, _ := user.Current()
+	return &serviceTemplater{
+		homeDir:  homeDir,
+		hostname: hostname,
+		username: currentUser.Username,
+		uid:      currentUser.Uid,
+	}
+}
+
+func (st *serviceTemplater) apply(svc *ServiceConfig, hostName string) {
+	r := strings.NewReplacer(
+		"%h", st.homeDir,
+		"%H", hostName,
+		"%R", st.hostname,
+		"%u", st.username,
+		"%U", st.uid,
+	)
+
+	svc.Subdomain = r.Replace(svc.Subdomain)
+	svc.ServeFiles = r.Replace(svc.ServeFiles)
+	svc.Unit = r.Replace(svc.Unit)
+	svc.ForwardsTo = r.Replace(svc.ForwardsTo)
+	svc.AllowOrigin = r.Replace(svc.AllowOrigin)
+}
+
+// compileDomainTemplate converts the domain_template string into a regex.
 // Placeholders ${subdomain} and ${host} are replaced with named capture groups.
-func compileTemplate(tmpl string) (*regexp.Regexp, error) {
+func compileDomainTemplate(tmpl string) (*regexp.Regexp, error) {
 	pat := regexp.QuoteMeta(tmpl)
 
 	// Replace escaped placeholders with capture groups in one pass.

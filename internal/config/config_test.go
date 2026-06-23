@@ -40,7 +40,7 @@ func TestHostRegex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		re, err := compileTemplate(tt.template)
+		re, err := compileDomainTemplate(tt.template)
 		if err != nil {
 			t.Fatalf("compileTemplate(%q): %v", tt.template, err)
 		}
