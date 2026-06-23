@@ -1,0 +1,42 @@
+listen:
+  http: "127.0.0.1:80" # required
+  https: "127.0.0.1:443" # optional
+ssl_certificate: ./localhost.crt
+ssl_certificate_key: ./localhost.key
+
+start_port: 12001 # starting port for ssh connections
+
+allow: # allow access from only these clients
+  - 127.0.0.1
+
+# ${host}: key in hosts config
+# ${subdomain}: subdomain key in services config, includes `.`, unless it is empty
+domain_template: "${subdomain}${host}.local"
+
+# when connected to ${subdomain}${host}.local, then
+# 1. if the host is the hostname of the running server, then services are started under the current server
+# 2. otherwise serveroute will route through ssh forwarding to ${host} by doing `ssh -L [listen.http]:localhost:[start_port+n] ${host}` where `start_port+n` is any port starting from the running server's start_port. then it will connect to that HTTP port with host `${subdomain}${host}.local` following the domain_template
+hosts:
+  "main":
+    services:
+      "main":
+        subdomain: "" # overrides default `main`
+        serve_files: ./public
+        hidden: true # defaults to false, hides this service from api
+        stoppable: false # defaults to true
+      "api": # domain == api.main.local
+        # exposes service start/stop/status
+        api: true
+        hidden: true
+        stoppable: false
+      "example":
+        service: example # use libsystemd to start/stop the `example` service
+        user: true # defaults to true, use the current user's systemd instance instead of the root
+        stops_after: 1800 # stops the service if last packet sent to `example.main.local` was more than 1800 seconds ago
+  "extern": # external server with hostname `extern` running serveroute with the same config file
+    services:
+      "main":
+        subdomain: "" # overrides default `main`
+        serve_files: ./public
+        stoppable: false
+
