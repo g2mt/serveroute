@@ -58,7 +58,13 @@ func main() {
 	watcher := buildWatcher(compiled)
 
 	// Build the handler.
-	handler := &handler{compiled: compiled, states: states, systemdMgr: systemdMgr, tunnelMgr: tunnelMgr, watcher: watcher}
+	handler := &handler{
+		compiled:   compiled,
+		states:     states,
+		systemdMgr: systemdMgr,
+		tunnelMgr:  tunnelMgr,
+		watcher:    watcher,
+	}
 
 	// Start idle reaper.
 	go idleReaper(states, systemdMgr)
