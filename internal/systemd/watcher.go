@@ -120,6 +120,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"unsafe"
 )
@@ -242,10 +243,18 @@ func (w *Watcher) initBus(useUser bool) error {
 func (w *Watcher) Start() {
 	go w.broadcast()
 	if w.userBus != nil {
-		go w.watchBus(w.userBus)
+		go func() {
+			if err := w.watchBus(w.userBus); err != nil {
+				log.Printf("systemd watcher: user bus error: %v", err)
+			}
+		}()
 	}
 	if w.systemBus != nil {
-		go w.watchBus(w.systemBus)
+		go func() {
+			if err := w.watchBus(w.systemBus); err != nil {
+				log.Printf("systemd watcher: system bus error: %v", err)
+			}
+		}()
 	}
 }
 
@@ -283,16 +292,19 @@ func (w *Watcher) Shutdown() {
 }
 
 // watchBus runs an epoll-based event loop for a single sd-bus connection.
-func (w *Watcher) watchBus(bus *C.sd_bus) {
+// Returns an error if the loop exits due to a failure; returns nil on clean shutdown.
+func (w *Watcher) watchBus(bus *C.sd_bus) error {
 	epollFd := C.epoll_create1(C.EPOLL_CLOEXEC)
 	if epollFd < 0 {
-		return
+		return fmt.Errorf("epoll_create1 failed")
 	}
 	defer C.close(epollFd)
 
 	busFd := C.sd_bus_get_fd(bus)
 	if busFd < 0 {
-		return
+		errStr := C.errstr(busFd)
+		defer C.free(unsafe.Pointer(errStr))
+		return fmt.Errorf("sd_bus_get_fd: %s", C.GoString(errStr))
 	}
 
 	// Register the bus fd with its current event mask.
@@ -301,7 +313,7 @@ func (w *Watcher) watchBus(bus *C.sd_bus) {
 	// epoll_data_t is a union; set the fd member for wake-up identification.
 	*(*C.int)(unsafe.Pointer(&ev.data)) = busFd
 	if C.epoll_ctl(epollFd, C.EPOLL_CTL_ADD, busFd, &ev) < 0 {
-		return
+		return fmt.Errorf("epoll_ctl ADD bus fd failed")
 	}
 
 	// Register the shutdown eventfd so Shutdown can interrupt epoll_wait.
@@ -340,7 +352,7 @@ func (w *Watcher) watchBus(bus *C.sd_bus) {
 			}
 		}
 		if shutdown {
-			return
+			return nil
 		}
 
 		// Drain all pending bus messages.
@@ -348,7 +360,10 @@ func (w *Watcher) watchBus(bus *C.sd_bus) {
 			var cPath, cState *C.char
 			r := C.do_process_event(bus, &cPath, &cState)
 			if r < 0 {
-				return
+				errStr := C.errstr(r)
+				err := fmt.Errorf("do_process_event: %s", C.GoString(errStr))
+				C.free(unsafe.Pointer(errStr))
+				return err
 			}
 			if r == 0 {
 				break // queue empty
