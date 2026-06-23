@@ -56,6 +56,8 @@ type ServiceConfig struct {
 	StopsAfter int `yaml:"stops_after"`
 	// ForwardsTo is the URL to reverse-proxy requests to.
 	ForwardsTo string `yaml:"forwards_to"`
+	// AllowOrigin sets the Access-Control-Allow-Origin header on responses.
+	AllowOrigin string `yaml:"allow_origin"`
 }
 
 // Stoppable returns true unless explicitly set to false.

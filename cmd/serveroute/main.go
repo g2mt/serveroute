@@ -278,6 +278,10 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 		return
 	}
 
+	if svc.AllowOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", svc.AllowOrigin)
+	}
+
 	switch {
 	case svc.ServeFiles != "":
 		fileServer := http.FileServer(http.Dir(svc.ServeFiles))

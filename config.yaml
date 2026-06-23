@@ -34,6 +34,7 @@ hosts:
         user: true # defaults to true, use the current user's systemd instance instead of the root
         stops_after: 1800 # stops the service if last packet sent to `example.main.local` was more than 1800 seconds ago
         forwards_to: "http://localhost:10240"
+        allow_origin: "*" # sets Access-Control-Allow-Origin header on responses
   "extern": # external server with hostname `extern` running serveroute with the same config file
     services:
       "main":
