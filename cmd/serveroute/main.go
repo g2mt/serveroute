@@ -312,28 +312,26 @@ func (h *handler) serveAPI(w http.ResponseWriter, r *http.Request, host string) 
 	// Simple API: list services and their statuses.
 	svcs := h.compiled.ServiceIndex[host]
 	type serviceInfo struct {
-		Subdomain string `json:"subdomain"`
-		Active    string `json:"active,omitempty"`
-		Stoppable bool   `json:"stoppable"`
+		Active    bool `json:"active"`
+		Stoppable bool `json:"stoppable"`
 	}
-	var result []serviceInfo
+	result := make(map[string]serviceInfo)
 	for sub, svc := range svcs {
 		if svc.Hidden {
 			continue
 		}
 		info := serviceInfo{
-			Subdomain: sub,
 			Stoppable: svc.IsStoppable(),
 		}
 		if svc.Service != "" {
 			state, err := h.systemdMgr.State(svc.Service, svc.UseUserBus())
 			if err != nil {
-				info.Active = "error: " + err.Error()
+				log.Printf("error obtaining state for %s: %v", svc.Service, err)
 			} else {
-				info.Active = state
+				info.Active = state == "active"
 			}
 		}
-		result = append(result, info)
+		result[sub] = info
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
