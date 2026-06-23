@@ -21,7 +21,6 @@ type Manager struct {
 	mu        sync.Mutex
 	tunnels   map[string]*tunnel
 	startPort int
-	localPort int // local HTTP port of the remote host (shared config)
 }
 
 // NewManager creates a tunnel manager.

@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 	"regexp"
@@ -78,10 +77,8 @@ func (s ServiceConfig) UsesUserBus() bool {
 
 // Compiled holds the validated config and pre-computed lookups.
 type Compiled struct {
-	Raw       *Config
 	HostRegex *regexp.Regexp
 	LocalHost string
-	HTTPPort  int // local HTTP port, extracted from listen address
 	AllowNets []netip.Prefix
 	// ServiceIndex maps host -> subdomain -> *ServiceConfig.
 	// A single systemd unit may appear under multiple subdomains or hosts;
@@ -144,14 +141,6 @@ func Compile(cfg *Config) (*Compiled, error) {
 		localHost = localHost[:idx]
 	}
 
-	// Extract local HTTP port.
-	_, portStr, err := net.SplitHostPort(cfg.Listen.HTTP)
-	if err != nil {
-		return nil, fmt.Errorf("parse listen.http %q: %w", cfg.Listen.HTTP, err)
-	}
-	localPort := 0
-	fmt.Sscanf(portStr, "%d", &localPort)
-
 	// Build service index and host port map.
 	serviceIndex := make(map[string]map[string]*ServiceConfig)
 
@@ -178,10 +167,8 @@ func Compile(cfg *Config) (*Compiled, error) {
 	}
 
 	return &Compiled{
-		Raw:          cfg,
 		HostRegex:    hostRegex,
 		LocalHost:    localHost,
-		HTTPPort:     localPort,
 		AllowNets:    allowNets,
 		ServiceIndex: serviceIndex,
 	}, nil
