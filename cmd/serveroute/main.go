@@ -58,7 +58,7 @@ func main() {
 	watcher := buildWatcher(compiled)
 
 	// Build the handler.
-	handler := newHandler(compiled, states, systemdMgr, tunnelMgr, watcher)
+	handler := &handler{compiled: compiled, states: states, systemdMgr: systemdMgr, tunnelMgr: tunnelMgr, watcher: watcher}
 
 	// Start idle reaper.
 	go idleReaper(states, systemdMgr)
@@ -158,19 +158,6 @@ type handler struct {
 	systemdMgr *systemd.Manager
 	tunnelMgr  *sshtunnels.Manager
 	watcher    *systemd.Watcher
-}
-
-func newHandler(compiled *config.Compiled, states map[string]map[string]*serviceState,
-	systemdMgr *systemd.Manager, tunnelMgr *sshtunnels.Manager,
-	watcher *systemd.Watcher) *handler {
-
-	return &handler{
-		compiled:   compiled,
-		states:     states,
-		systemdMgr: systemdMgr,
-		tunnelMgr:  tunnelMgr,
-		watcher:    watcher,
-	}
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
