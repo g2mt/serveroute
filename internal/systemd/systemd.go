@@ -149,6 +149,45 @@ func NewManager() *Manager {
 	return m
 }
 
+func (m *Manager) do(a action, name string, useUser bool) error {
+	respChan := make(chan response, 1)
+	m.reqs <- request{
+		action:   a,
+		name:     name,
+		useUser:  useUser,
+		respChan: respChan,
+	}
+	resp := <-respChan
+	return resp.err
+}
+
+func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
+	if useUser {
+		if m.userBus == nil {
+			var bus *C.sd_bus
+			r := C.sd_bus_default_user(&bus)
+			if r < 0 {
+				errStr := C.errstr(r)
+				defer C.free(unsafe.Pointer(errStr))
+				return nil, fmt.Errorf("sd_bus_default_user: %s", C.GoString(errStr))
+			}
+			m.userBus = bus
+		}
+		return m.userBus, nil
+	}
+	if m.systemBus == nil {
+		var bus *C.sd_bus
+		r := C.sd_bus_open_system(&bus)
+		if r < 0 {
+			errStr := C.errstr(r)
+			defer C.free(unsafe.Pointer(errStr))
+			return nil, fmt.Errorf("sd_bus_open_system: %s", C.GoString(errStr))
+		}
+		m.systemBus = bus
+	}
+	return m.systemBus, nil
+}
+
 // Start starts a systemd unit.
 func (m *Manager) Start(name string, useUser bool) error {
 	return m.do(actionStart, name, useUser)
@@ -177,18 +216,6 @@ func (m *Manager) Shutdown() {
 	m.once.Do(func() {
 		close(m.done)
 	})
-}
-
-func (m *Manager) do(a action, name string, useUser bool) error {
-	respChan := make(chan response, 1)
-	m.reqs <- request{
-		action:   a,
-		name:     name,
-		useUser:  useUser,
-		respChan: respChan,
-	}
-	resp := <-respChan
-	return resp.err
 }
 
 func (m *Manager) loop() {
@@ -246,33 +273,6 @@ func (m *Manager) handle(req request) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown action: %d", req.action)
 	}
-}
-
-func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
-	if useUser {
-		if m.userBus == nil {
-			var bus *C.sd_bus
-			r := C.sd_bus_default_user(&bus)
-			if r < 0 {
-				errStr := C.errstr(r)
-				defer C.free(unsafe.Pointer(errStr))
-				return nil, fmt.Errorf("sd_bus_default_user: %s", C.GoString(errStr))
-			}
-			m.userBus = bus
-		}
-		return m.userBus, nil
-	}
-	if m.systemBus == nil {
-		var bus *C.sd_bus
-		r := C.sd_bus_open_system(&bus)
-		if r < 0 {
-			errStr := C.errstr(r)
-			defer C.free(unsafe.Pointer(errStr))
-			return nil, fmt.Errorf("sd_bus_open_system: %s", C.GoString(errStr))
-		}
-		m.systemBus = bus
-	}
-	return m.systemBus, nil
 }
 
 func (m *Manager) cleanup() {
