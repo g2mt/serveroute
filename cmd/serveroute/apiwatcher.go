@@ -4,32 +4,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-
-	"serveroute/internal/config"
-	"serveroute/internal/systemd"
 )
-
-// buildWatcher creates a systemd.Watcher, registers every systemd-backed
-// unit from the compiled config, and starts the event loop.
-func buildWatcher(compiled *config.Compiled) *systemd.Watcher {
-	w := systemd.NewWatcher()
-
-	for _, svcs := range compiled.ServiceIndex {
-		for _, svc := range svcs {
-			if svc.Unit == "" {
-				continue
-			}
-			if err := w.Add(svc.Unit, svc.UsesUserBus()); err != nil {
-				log.Printf("watcher: add %s: %v", svc.Unit, err)
-			}
-		}
-	}
-
-	w.Start()
-	return w
-}
 
 // apiWatchSSE serves a Server-Sent Events stream of service state changes.
 //

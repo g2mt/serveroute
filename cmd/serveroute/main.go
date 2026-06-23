@@ -54,8 +54,18 @@ func main() {
 	systemdMgr := systemd.NewManager()
 	tunnelMgr := sshtunnels.NewManager(cfg.StartPort)
 
-	// Build watcher for SSE state-change streaming.
-	watcher := buildWatcher(compiled)
+	// Build watcher for SSE state-change streaming (local host only).
+	watcher := systemd.NewWatcher()
+	if localSvcs, ok := compiled.ServiceIndex[compiled.LocalHost]; ok {
+		for _, svc := range localSvcs {
+			if svc.Unit != "" {
+				if err := watcher.Add(svc.Unit, svc.UsesUserBus()); err != nil {
+					log.Printf("watcher: add %s: %v", svc.Unit, err)
+				}
+			}
+		}
+	}
+	watcher.Start()
 
 	// Build the handler.
 	handler := &handler{
