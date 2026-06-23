@@ -87,8 +87,6 @@ type Compiled struct {
 	// A single systemd unit may appear under multiple subdomains or hosts;
 	// the watcher tolerates duplicate Add calls for the same unit name.
 	ServiceIndex map[string]map[string]*ServiceConfig
-	// HostPorts maps host -> its HTTP listen port (from shared config).
-	HostPorts map[string]int
 }
 
 // Load reads and parses config.yaml from path.
@@ -156,7 +154,6 @@ func Compile(cfg *Config) (*Compiled, error) {
 
 	// Build service index and host port map.
 	serviceIndex := make(map[string]map[string]*ServiceConfig)
-	hostPorts := make(map[string]int)
 
 	for hostName, hostCfg := range cfg.Hosts {
 		svcMap := make(map[string]*ServiceConfig)
@@ -174,7 +171,6 @@ func Compile(cfg *Config) (*Compiled, error) {
 			svcMap[subdomain] = &sc
 		}
 		serviceIndex[hostName] = svcMap
-		hostPorts[hostName] = localPort // same config everywhere, use local port
 	}
 
 	if cfg.StartPort == 0 {
@@ -188,7 +184,6 @@ func Compile(cfg *Config) (*Compiled, error) {
 		HTTPPort:     localPort,
 		AllowNets:    allowNets,
 		ServiceIndex: serviceIndex,
-		HostPorts:    hostPorts,
 	}, nil
 }
 

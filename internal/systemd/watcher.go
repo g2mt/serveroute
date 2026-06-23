@@ -294,6 +294,20 @@ func (w *Watcher) Shutdown() {
 		}
 		w.subscribers = nil
 		w.subsMu.Unlock()
+
+		// Clean up bus connections and shutdownFd.
+		if w.shutdownFd >= 0 {
+			C.close(w.shutdownFd)
+			w.shutdownFd = -1
+		}
+		if w.userBus != nil {
+			C.sd_bus_unref(w.userBus)
+			w.userBus = nil
+		}
+		if w.systemBus != nil {
+			C.sd_bus_unref(w.systemBus)
+			w.systemBus = nil
+		}
 	})
 }
 
@@ -423,17 +437,3 @@ func (w *Watcher) broadcast() {
 	}
 }
 
-func (w *Watcher) cleanup() {
-	if w.shutdownFd >= 0 {
-		C.close(w.shutdownFd)
-		w.shutdownFd = -1
-	}
-	if w.userBus != nil {
-		C.sd_bus_unref(w.userBus)
-		w.userBus = nil
-	}
-	if w.systemBus != nil {
-		C.sd_bus_unref(w.systemBus)
-		w.systemBus = nil
-	}
-}

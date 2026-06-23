@@ -11,10 +11,9 @@ import (
 
 // tunnel represents a single SSH tunnel to a remote host.
 type tunnel struct {
-	host     string
-	port     int
-	cmd      *exec.Cmd
-	done     chan struct{}
+	host string
+	port int
+	cmd  *exec.Cmd
 }
 
 // Manager holds all active SSH tunnels.
@@ -70,7 +69,6 @@ func (m *Manager) Get(host string) (int, error) {
 		host: host,
 		port: port,
 		cmd:  cmd,
-		done: make(chan struct{}),
 	}
 	m.tunnels[host] = t
 	m.mu.Unlock()
