@@ -10,9 +10,7 @@ Dependencies: **Go standard library only**, plus a thin cgo wrapper around
 
 ## The four components
 
-There are exactly four pieces. Everything in the previous draft (ConnFilter,
-HostRouter, ServiceRouter, IdleTracker, PortAllocator, Management API) folds
-into these.
+There are exactly four pieces.
 
 ```
  +-----------------------+        +------------------+
@@ -35,16 +33,20 @@ into these.
 
 One `http.ServeMux`-equivalent, one handler function. It does, in order:
 
-1. **allow-list**: compare `r.RemoteAddr`'s IP against `allow` (a `[]netip.Addr`).
+1. **allow-list**: compare `r.RemoteAddr`'s IP against `allow` (a `[]netip.Prefix`).
    Reject → `403`. No separate listener wrapper.
 2. **parse Host**: strip port, match against `domain_template` to split
    `subdomain` and `host`. One regex, compiled once.
 3. **dispatch** (one `switch`):
    - `host` is remote (`!= os.Hostname()`) → call `sshTunnels.Get(host)` and
      `httputil.ReverseProxy` to its local port, preserving `Host`.
+     The same `config.yaml` is deployed everywhere, so the remote HTTP port is
+     known locally from the shared config.
    - `host` is local → look up `services[subdomain]`:
      - `serve_files` → `http.FileServer`.
      - `api: true` → inline API handlers (a few routes on this same handler).
+       These API handlers are also served when the request reached this host
+       through an SSH tunnel — the remote host's handler processes it the same way.
      - `service` → ensure systemd unit active (call `systemd.Start` if needed),
        update last-seen, `httputil.ReverseProxy` to
        `127.0.0.1:<start_port + service index>`.
@@ -75,27 +77,21 @@ The entire remote-host subsystem. `Get(host)` lazily spawns, if not present:
 ssh -L 127.0.0.1:<port>:localhost:<remote_http_port> <host>
 ```
 
+`<remote_http_port>` is known because the same `config.yaml` is deployed on
+every host; the local instance reads the remote host's HTTP listener port
+from its own copy of the config.
+
 `<port>` is the next free port at/after `start_port` (probed with
 `net.Listen`). A goroutine waits on the `ssh` process and, on unexpected exit,
 removes the entry so the next `Get` re-establishes it. Nothing else.
 
 ### 4. `config` (load + validate)
 
-Parses `config.yaml` into structs, computes per-service `start_port + index`,
-pre-resolves the local hostname via `os.Hostname()`, compiles the one
-domain-template regex. Pure data, no behavior.
-
-## What was dropped and why
-
-| Dropped component | Folded into |
-|---|---|
-| ConnFilter | first 3 lines of the handler |
-| HostRouter | one regex + split in the handler |
-| ServiceRouter | the `switch` in the handler |
-| IdleTracker | a ticker goroutine inside `systemd` + `atomic.Int64` fields |
-| PortAllocator | inline `net.Listen` probe in `sshTunnels` |
-| Management API | a couple of inline routes in the same handler |
-| SSHTunnelManager | `sshTunnels` map + mutex |
+The same `config.yaml` is deployed on every host. Each instance parses it
+into structs, computes per-service `start_port + index`, pre-resolves the
+local hostname via `os.Hostname()`, compiles the one domain-template regex.
+Because the config is uniform, the remote HTTP port for each host is known
+locally without out-of-band coordination. Pure data, no behavior.
 
 ## Concurrency model
 
@@ -106,6 +102,11 @@ domain-template regex. Pure data, no behavior.
 - `systemd`: single goroutine owns the sd-bus connection; callers send a request
   on a channel and block on the reply. Per-service last-seen is `atomic.Int64`.
 - No other shared mutable state.
+
+## TLS
+
+TLS certificates are loaded once at startup. Reload is restart-only: there is
+no `SIGHUP` handler. To rotate certs, restart the process.
 
 ## Shutdown
 
@@ -123,10 +124,3 @@ internal/sshtunnels         // map[host]*tunnel, lazy ssh -L, restart
 
 Four files of real logic. The handler lives in `main.go`.
 
-## Open questions
-
-1. Is the same `config.yaml` deployed on every host (so the remote HTTP port is
-   known locally)? Draft assumes yes.
-2. `allow` IP-only now; add CIDR later (swap `[]netip.Addr` for `[]netip.Prefix`).
-3. `api` services reachable over a remote tunnel, or strictly local?
-4. TLS cert reload on `SIGHUP`, or restart-only?
