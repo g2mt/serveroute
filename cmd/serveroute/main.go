@@ -27,7 +27,8 @@ import (
 // serviceState tracks runtime state for a systemd-backed service.
 type serviceState struct {
 	cfg      *config.ServiceConfig
-	lastSeen atomic.Int64 // unix timestamp of last proxied request
+	lastSeen atomic.Int64           // unix timestamp of last proxied request
+	proxy    *httputil.ReverseProxy // nil if no forwards_to
 }
 
 func main() {
@@ -124,6 +125,19 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 			if svc.Service != "" {
 				ss := &serviceState{cfg: svc}
 				ss.lastSeen.Store(time.Now().Unix())
+				if svc.ForwardsTo != "" {
+					target, err := url.Parse(svc.ForwardsTo)
+					if err != nil {
+						log.Printf("invalid forwards_to for %s/%s: %v", host, sub, err)
+					} else {
+						ss.proxy = &httputil.ReverseProxy{
+							Rewrite: func(pr *httputil.ProxyRequest) {
+								pr.SetURL(target)
+								setProxyHeaders(pr.Out)
+							},
+						}
+					}
+				}
 				m[sub] = ss
 			}
 		}
@@ -140,42 +154,17 @@ type handler struct {
 	states     map[string]map[string]*serviceState
 	systemdMgr *systemd.Manager
 	tunnelMgr  *sshtunnels.Manager
-	// Pre-built reverse proxies for each service's forwards_to.
-	proxies map[string]*httputil.ReverseProxy // key: host/subdomain
 }
 
 func newHandler(compiled *config.Compiled, states map[string]map[string]*serviceState,
 	systemdMgr *systemd.Manager, tunnelMgr *sshtunnels.Manager) *handler {
 
-	h := &handler{
+	return &handler{
 		compiled:   compiled,
 		states:     states,
 		systemdMgr: systemdMgr,
 		tunnelMgr:  tunnelMgr,
-		proxies:    make(map[string]*httputil.ReverseProxy),
 	}
-
-	// Pre-build reverse proxies for service forwards_to URLs.
-	for host, svcs := range compiled.ServiceIndex {
-		for sub, svc := range svcs {
-			if svc.ForwardsTo != "" {
-				target, err := url.Parse(svc.ForwardsTo)
-				if err != nil {
-					log.Printf("invalid forwards_to for %s/%s: %v", host, sub, err)
-					continue
-				}
-				rp := &httputil.ReverseProxy{
-					Rewrite: func(pr *httputil.ProxyRequest) {
-						pr.SetURL(target)
-						setProxyHeaders(pr.Out)
-					},
-				}
-				h.proxies[key(host, sub)] = rp
-			}
-		}
-	}
-
-	return h
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -304,18 +293,14 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 			}
 		}
 
-		// Update last-seen timestamp.
-		if ss := h.lookupState(host, subdomain); ss != nil {
-			ss.lastSeen.Store(time.Now().Unix())
-		}
-
-		// Reverse proxy.
-		proxyKey := key(host, subdomain)
-		if rp, ok := h.proxies[proxyKey]; ok {
-			rp.ServeHTTP(w, r)
-		} else {
+		// Update last-seen timestamp and reverse proxy.
+		ss := h.lookupState(host, subdomain)
+		if ss == nil || ss.proxy == nil {
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
+			return
 		}
+		ss.lastSeen.Store(time.Now().Unix())
+		ss.proxy.ServeHTTP(w, r)
 
 	default:
 		http.Error(w, "404 Not Found", http.StatusNotFound)
@@ -416,6 +401,3 @@ func setProxyHeaders(req *http.Request) {
 	// X-Forwarded-For is already handled by httputil.ReverseProxy.
 }
 
-func key(host, subdomain string) string {
-	return host + "/" + subdomain
-}
