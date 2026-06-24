@@ -247,9 +247,16 @@ func (h *handler) matchHost(hostHeader string) (host string, subdomain string, o
 }
 
 func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHost, subdomain string) {
-	port, err := h.tunnelMgr.Get(remoteHost + ".local")
+	// If ssh_host is configured for this host, use it instead of the
+	// remote hostname for the SSH tunnel connection.
+	tunnelHost := remoteHost
+	if hostCfg, ok := h.compiled.Hosts[remoteHost]; ok && hostCfg.SSHHost != "" {
+		tunnelHost = hostCfg.SSHHost
+	}
+
+	port, err := h.tunnelMgr.Get(tunnelHost)
 	if err != nil {
-		log.Printf("ssh tunnel to %s: %v", remoteHost, err)
+		log.Printf("ssh tunnel to %s: %v", tunnelHost, err)
 		http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 		return
 	}

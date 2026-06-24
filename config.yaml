@@ -36,6 +36,7 @@ hosts:
         forwards_to: "http://localhost:10240"
         allow_origin: "*" # sets Access-Control-Allow-Origin header on responses
   "extern": # external server with hostname `extern` running serveroute with the same config file
+    ssh_host: extern.example.com # optional, overrides the hostname used for the SSH tunnel
     services:
       "main":
         subdomain: "" # overrides default `main`

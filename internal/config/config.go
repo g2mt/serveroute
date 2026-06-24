@@ -34,6 +34,7 @@ type ListenConfig struct {
 // HostConfig holds the services for a single host.
 type HostConfig struct {
 	Services map[string]ServiceConfig `yaml:"services"`
+	SSHHost  string                   `yaml:"ssh_host"`
 }
 
 // ServiceConfig defines how a single subdomain is handled.
@@ -62,6 +63,7 @@ type ServiceConfig struct {
 
 // Compiled holds the validated config and pre-computed lookups.
 type Compiled struct {
+	*Config
 	HostRegex *regexp.Regexp
 	LocalHost string
 	AllowNets []netip.Prefix
@@ -106,6 +108,10 @@ func Compile(cfg *Config) (*Compiled, error) {
 		return nil, fmt.Errorf("listen.http is required")
 	}
 
+	if cfg.StartPort == 0 {
+		return nil, fmt.Errorf("start_port is required")
+	}
+
 	// Parse allow list.
 	allowNets := make([]netip.Prefix, 0, len(cfg.Allow))
 	for _, a := range cfg.Allow {
@@ -145,9 +151,8 @@ func Compile(cfg *Config) (*Compiled, error) {
 	// Build a cached templater for placeholder replacement across all services.
 	templater := newServiceTemplater()
 
-	// Build service index and host port map.
+	// Build service index.
 	serviceIndex := make(map[string]map[string]*ServiceConfig)
-
 	for hostName, hostCfg := range cfg.Hosts {
 		svcMap := make(map[string]*ServiceConfig)
 		for svcKey, svc := range hostCfg.Services {
@@ -168,11 +173,8 @@ func Compile(cfg *Config) (*Compiled, error) {
 		serviceIndex[hostName] = svcMap
 	}
 
-	if cfg.StartPort == 0 {
-		return nil, fmt.Errorf("start_port is required")
-	}
-
 	return &Compiled{
+		Config:       cfg,
 		HostRegex:    hostRegex,
 		LocalHost:    localHost,
 		AllowNets:    allowNets,
