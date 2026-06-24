@@ -247,8 +247,6 @@ func (h *handler) matchHost(hostHeader string) (host string, subdomain string, o
 }
 
 func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHost, subdomain string) {
-	// If ssh_host is configured for this host, use it instead of the
-	// remote hostname for the SSH tunnel connection.
 	tunnelHost := remoteHost
 	if hostCfg, ok := h.compiled.Hosts[remoteHost]; ok && hostCfg.SSHHost != "" {
 		tunnelHost = hostCfg.SSHHost
