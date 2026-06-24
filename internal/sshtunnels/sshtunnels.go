@@ -109,15 +109,13 @@ func (m *Manager) Shutdown() {
 }
 
 func (m *Manager) findFreePort() (int, error) {
-	port := m.startPort
-	for i := 0; i < 100; i++ {
+	for port := m.startPort; port < 65535; port++ {
 		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 		l, err := net.Listen("tcp", addr)
 		if err == nil {
 			l.Close()
 			return port, nil
 		}
-		port++
 	}
 	return 0, fmt.Errorf("no free port found starting at %d", m.startPort)
 }
