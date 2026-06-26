@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"serveroute/internal/config"
-	"serveroute/internal/sshtunnels"
 	"serveroute/internal/platform"
+	"serveroute/internal/sshtunnels"
 )
 
-// serviceState tracks runtime state for a systemd-backed service.
+// serviceState tracks runtime state for a platform-backed service.
 type serviceState struct {
 	cfg      *config.ServiceConfig
 	lastSeen atomic.Int64           // unix timestamp of last proxied request
@@ -51,7 +51,7 @@ func main() {
 	states := buildStates(compiled)
 
 	// Subsystems.
-	systemdMgr := platform.NewManager()
+	platformMgr := platform.NewManager()
 	tunnelMgr := sshtunnels.NewManager(cfg.StartPort)
 
 	// Build watcher for SSE state-change streaming (local host only).
@@ -69,15 +69,15 @@ func main() {
 
 	// Build the handler.
 	handler := &handler{
-		compiled:   compiled,
-		states:     states,
-		systemdMgr: systemdMgr,
-		tunnelMgr:  tunnelMgr,
-		watcher:    watcher,
+		compiled:    compiled,
+		states:      states,
+		platformMgr: platformMgr,
+		tunnelMgr:   tunnelMgr,
+		watcher:     watcher,
 	}
 
 	// Start idle reaper.
-	go idleReaper(states, systemdMgr)
+	go idleReaper(states, platformMgr)
 
 	// Set up HTTP server.
 	httpServer := &http.Server{
@@ -130,12 +130,12 @@ func main() {
 
 	watcher.Shutdown()
 	tunnelMgr.Shutdown()
-	systemdMgr.Shutdown()
+	platformMgr.Shutdown()
 
 	log.Println("shutdown complete")
 }
 
-// buildStates creates serviceState entries for every systemd-backed service.
+// buildStates creates serviceState entries for every platform-backed service.
 func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState {
 	states := make(map[string]map[string]*serviceState)
 	for host, svcs := range compiled.ServiceIndex {
@@ -169,11 +169,11 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 
 // handler is the single http.Handler for all requests.
 type handler struct {
-	compiled   *config.Compiled
-	states     map[string]map[string]*serviceState
-	tunnelMgr  *sshtunnels.Manager
-	systemdMgr *platform.Manager
-	watcher    *platform.Watcher
+	compiled    *config.Compiled
+	states      map[string]map[string]*serviceState
+	tunnelMgr   *sshtunnels.Manager
+	platformMgr *platform.Manager
+	watcher     *platform.Watcher
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -304,15 +304,15 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 		h.serveAPI(w, r, host)
 
 	case svc.Unit != "":
-		// Ensure systemd unit is active.
-		state, err := h.systemdMgr.State(svc.Unit, *svc.User)
+		// Ensure platform unit is active.
+		state, err := h.platformMgr.State(svc.Unit, *svc.User)
 		if err != nil {
 			log.Printf("state %s: %v", svc.Unit, err)
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 			return
 		}
 		if state != "active" && state != "activating" {
-			if err := h.systemdMgr.Start(svc.Unit, *svc.User); err != nil {
+			if err := h.platformMgr.Start(svc.Unit, *svc.User); err != nil {
 				log.Printf("start %s: %v", svc.Unit, err)
 				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 				return
@@ -340,7 +340,7 @@ func (h *handler) lookupState(host, subdomain string) *serviceState {
 	return nil
 }
 
-// idleReaper periodically checks and stops idle systemd services.
+// idleReaper periodically checks and stops idle platform services.
 func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manager) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
