@@ -20,7 +20,7 @@ import (
 
 	"serveroute/internal/config"
 	"serveroute/internal/sshtunnels"
-	"serveroute/internal/systemd"
+	"serveroute/internal/platform"
 )
 
 // serviceState tracks runtime state for a systemd-backed service.
@@ -51,11 +51,11 @@ func main() {
 	states := buildStates(compiled)
 
 	// Subsystems.
-	systemdMgr := systemd.NewManager()
+	systemdMgr := platform.NewManager()
 	tunnelMgr := sshtunnels.NewManager(cfg.StartPort)
 
 	// Build watcher for SSE state-change streaming (local host only).
-	watcher := systemd.NewWatcher()
+	watcher := platform.NewWatcher()
 	if localSvcs, ok := compiled.ServiceIndex[compiled.LocalHost]; ok {
 		for _, svc := range localSvcs {
 			if svc.Unit != "" {
@@ -171,9 +171,9 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 type handler struct {
 	compiled   *config.Compiled
 	states     map[string]map[string]*serviceState
-	systemdMgr *systemd.Manager
 	tunnelMgr  *sshtunnels.Manager
-	watcher    *systemd.Watcher
+	systemdMgr *platform.Manager
+	watcher    *platform.Watcher
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +341,7 @@ func (h *handler) lookupState(host, subdomain string) *serviceState {
 }
 
 // idleReaper periodically checks and stops idle systemd services.
-func idleReaper(states map[string]map[string]*serviceState, mgr *systemd.Manager) {
+func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manager) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 

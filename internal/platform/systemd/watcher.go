@@ -1,6 +1,8 @@
 // watcher.go — systemd unit state-change watcher with epoll-based event loop.
 package systemd
 
+// Event represents a systemd unit state change detected by the Watcher.
+
 /*
 #cgo pkg-config: libsystemd
 #include <systemd/sd-bus.h>

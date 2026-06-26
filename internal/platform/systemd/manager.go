@@ -2,6 +2,9 @@
 // All calls are serialized through a single goroutine that owns the bus connections.
 package systemd
 
+// EnsureSuffix appends ".service" to name if it does not already carry a known
+// systemd unit suffix (e.g. ".timer", ".socket", ".service", etc.).
+
 /*
 #cgo pkg-config: libsystemd
 #include <systemd/sd-bus.h>

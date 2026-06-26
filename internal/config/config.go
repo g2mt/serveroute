@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/user"
 	"regexp"
-	"serveroute/internal/systemd"
+	"serveroute/internal/platform"
 	"strings"
 	"time"
 
@@ -166,7 +166,7 @@ func Compile(cfg *Config) (*Compiled, error) {
 			templater.apply(&sc, hostName)
 			// Correct systemd unit suffixes
 			if sc.Unit != "" {
-				sc.Unit = systemd.EnsureSuffix(sc.Unit)
+				sc.Unit = platform.EnsureSuffix(sc.Unit)
 			}
 			svcMap[subdomain] = &sc
 		}
