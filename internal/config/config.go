@@ -59,6 +59,8 @@ type ServiceConfig struct {
 	ForwardsTo string `yaml:"forwards_to"`
 	// AllowOrigin sets the Access-Control-Allow-Origin header on responses.
 	AllowOrigin string `yaml:"allow_origin"`
+	// Headers is a map of additional HTTP headers to set on proxied requests.
+	Headers map[string]string `yaml:"headers"`
 }
 
 // Compiled holds the validated config and pre-computed lookups.
@@ -225,6 +227,12 @@ func (st *serviceTemplater) apply(svc *ServiceConfig, hostName string) {
 	svc.Unit = r.Replace(svc.Unit)
 	svc.ForwardsTo = r.Replace(svc.ForwardsTo)
 	svc.AllowOrigin = r.Replace(svc.AllowOrigin)
+
+	// Apply template replacement to header key/value pairs.
+	for k, v := range svc.Headers {
+		delete(svc.Headers, k)
+		svc.Headers[r.Replace(k)] = r.Replace(v)
+	}
 }
 
 // compileDomainTemplate converts the domain_template string into a regex.

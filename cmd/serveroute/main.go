@@ -154,7 +154,7 @@ func (h *handler) buildStates(compiled *config.Compiled) map[string]map[string]*
 								// upgrades and routed endpoints work.
 								pr.Out.URL.Scheme = target.Scheme
 								pr.Out.URL.Host = target.Host
-								h.setProxyHeaders(pr.Out, pr.In)
+								h.setProxyHeaders(pr, svc.Headers)
 							},
 						}
 					}
@@ -268,7 +268,7 @@ func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHos
 			// Preserve original path/query for WebSocket upgrades.
 			pr.Out.URL.Scheme = target.Scheme
 			pr.Out.URL.Host = target.Host
-			h.setProxyHeaders(pr.Out, pr.In)
+			h.setProxyHeaders(pr, nil)
 		},
 	}
 	rp.ServeHTTP(w, r)
@@ -370,24 +370,29 @@ func (h *handler) idleReaper() {
 }
 
 // setProxyHeaders adds standard nginx-style proxy headers to the outgoing
-// request.  inReq is the original client request (used for real client IP
-// and TLS detection); outReq is the request being sent to the backend.
-func (h *handler) setProxyHeaders(outReq, inReq *http.Request) {
+// request.  extraHeaders is an optional map of additional headers to set
+// on the proxied request.
+func (h *handler) setProxyHeaders(pr *httputil.ProxyRequest, extraHeaders map[string]string) {
 	// Host → localhost (mimics proxy_set_header Host localhost).
-	outReq.Host = "127.0.0.1"
+	pr.Out.Host = "127.0.0.1"
 
 	// X-Real-IP → client address.
-	clientIP, _, err := net.SplitHostPort(inReq.RemoteAddr)
+	clientIP, _, err := net.SplitHostPort(pr.In.RemoteAddr)
 	if err != nil {
-		clientIP = inReq.RemoteAddr
+		clientIP = pr.In.RemoteAddr
 	}
-	outReq.Header.Set("X-Real-IP", clientIP)
+	pr.Out.Header.Set("X-Real-IP", clientIP)
 
 	// X-Forwarded-Proto → original scheme.
-	if inReq.TLS != nil {
-		outReq.Header.Set("X-Forwarded-Proto", "https")
+	if pr.In.TLS != nil {
+		pr.Out.Header.Set("X-Forwarded-Proto", "https")
 	} else {
-		outReq.Header.Set("X-Forwarded-Proto", "http")
+		pr.Out.Header.Set("X-Forwarded-Proto", "http")
 	}
 	// X-Forwarded-For is already handled by httputil.ReverseProxy.
+
+	// Set any service-configured extra headers.
+	for key, value := range extraHeaders {
+		pr.Out.Header.Set(key, value)
+	}
 }
