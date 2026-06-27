@@ -47,9 +47,6 @@ func main() {
 	log.Printf("local host: %s", compiled.LocalHost)
 	log.Printf("domain regex: %s", compiled.HostRegex)
 
-	// Build service state tracking.
-	states := buildStates(compiled)
-
 	// Subsystems.
 	platformMgr := platform.NewManager()
 	tunnelMgr := sshtunnels.NewManager(cfg.StartPort)
@@ -67,17 +64,19 @@ func main() {
 	}
 	watcher.Start()
 
-	// Build the handler.
+	// Build the handler and service state tracking.
 	handler := &handler{
 		compiled:    compiled,
-		states:      states,
 		platformMgr: platformMgr,
 		tunnelMgr:   tunnelMgr,
 		watcher:     watcher,
 	}
 
+	states := handler.buildStates(compiled)
+	handler.states = states
+
 	// Start idle reaper.
-	go idleReaper(states, platformMgr)
+	go handler.idleReaper()
 
 	// Set up HTTP server.
 	httpServer := &http.Server{
@@ -102,11 +101,11 @@ func main() {
 
 	errCh := make(chan error, 2)
 
-	go func() {
-		if httpsServer != nil {
+	if httpsServer != nil {
+		go func() {
 			errCh <- httpsServer.ListenAndServeTLS(cfg.SSLCertificate, cfg.SSLCertificateKey)
-		}
-	}()
+		}()
+	}
 	go func() {
 		errCh <- httpServer.ListenAndServe()
 	}()
@@ -136,7 +135,7 @@ func main() {
 }
 
 // buildStates creates serviceState entries for every platform-backed service.
-func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState {
+func (h *handler) buildStates(compiled *config.Compiled) map[string]map[string]*serviceState {
 	states := make(map[string]map[string]*serviceState)
 	for host, svcs := range compiled.ServiceIndex {
 		m := make(map[string]*serviceState)
@@ -155,7 +154,7 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 								// upgrades and routed endpoints work.
 								pr.Out.URL.Scheme = target.Scheme
 								pr.Out.URL.Host = target.Host
-								setProxyHeaders(pr.Out, pr.In)
+								h.setProxyHeaders(pr.Out, pr.In)
 							},
 						}
 					}
@@ -269,7 +268,7 @@ func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHos
 			// Preserve original path/query for WebSocket upgrades.
 			pr.Out.URL.Scheme = target.Scheme
 			pr.Out.URL.Host = target.Host
-			setProxyHeaders(pr.Out, pr.In)
+			h.setProxyHeaders(pr.Out, pr.In)
 		},
 	}
 	rp.ServeHTTP(w, r)
@@ -346,13 +345,13 @@ func (h *handler) lookupState(host, subdomain string) *serviceState {
 }
 
 // idleReaper periodically checks and stops idle platform services.
-func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manager) {
+func (h *handler) idleReaper() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		now := time.Now().Unix()
-		for _, svcMap := range states {
+		for _, svcMap := range h.states {
 			for _, ss := range svcMap {
 				if !*ss.cfg.Stoppable {
 					continue
@@ -363,13 +362,13 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manage
 				}
 				lastSeen := ss.lastSeen.Load()
 				if now-lastSeen >= int64(stopsAfter.Seconds()) {
-					state, err := mgr.State(ss.cfg.Unit, *ss.cfg.User)
+					state, err := h.platformMgr.State(ss.cfg.Unit, *ss.cfg.User)
 					if err != nil {
 						continue
 					}
 					if state == "active" || state == "activating" {
 						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Unit, now-lastSeen)
-						mgr.Stop(ss.cfg.Unit, *ss.cfg.User)
+						h.platformMgr.Stop(ss.cfg.Unit, *ss.cfg.User)
 					}
 				}
 			}
@@ -380,9 +379,9 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manage
 // setProxyHeaders adds standard nginx-style proxy headers to the outgoing
 // request.  inReq is the original client request (used for real client IP
 // and TLS detection); outReq is the request being sent to the backend.
-func setProxyHeaders(outReq, inReq *http.Request) {
+func (h *handler) setProxyHeaders(outReq, inReq *http.Request) {
 	// Host → localhost (mimics proxy_set_header Host localhost).
-	outReq.Host = "localhost"
+	outReq.Host = "127.0.0.1"
 
 	// X-Real-IP → client address.
 	clientIP, _, err := net.SplitHostPort(inReq.RemoteAddr)
