@@ -324,7 +324,7 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 		}
 
 		// Update last-seen timestamp and reverse proxy.
-		ss := h.lookupState(host, subdomain)
+		ss := h.states[host][subdomain]
 		if ss == nil || ss.proxy == nil {
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 			return
@@ -335,13 +335,6 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 	default:
 		http.Error(w, "404 Not Found", http.StatusNotFound)
 	}
-}
-
-func (h *handler) lookupState(host, subdomain string) *serviceState {
-	if hm, ok := h.states[host]; ok {
-		return hm[subdomain]
-	}
-	return nil
 }
 
 // idleReaper periodically checks and stops idle platform services.
