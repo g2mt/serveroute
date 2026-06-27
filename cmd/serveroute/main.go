@@ -151,8 +151,11 @@ func buildStates(compiled *config.Compiled) map[string]map[string]*serviceState 
 					} else {
 						ss.proxy = &httputil.ReverseProxy{
 							Rewrite: func(pr *httputil.ProxyRequest) {
-								pr.SetURL(target)
-								setProxyHeaders(pr.Out)
+								// Preserve original path/query so WebSocket
+								// upgrades and routed endpoints work.
+								pr.Out.URL.Scheme = target.Scheme
+								pr.Out.URL.Host = target.Host
+								setProxyHeaders(pr.Out, pr.In)
 							},
 						}
 					}
@@ -263,8 +266,10 @@ func (h *handler) handleRemote(w http.ResponseWriter, r *http.Request, remoteHos
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			setProxyHeaders(pr.Out)
+			// Preserve original path/query for WebSocket upgrades.
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Host = target.Host
+			setProxyHeaders(pr.Out, pr.In)
 		},
 	}
 	rp.ServeHTTP(w, r)
@@ -372,23 +377,25 @@ func idleReaper(states map[string]map[string]*serviceState, mgr *platform.Manage
 	}
 }
 
-// setProxyHeaders adds standard nginx-style proxy headers to the outgoing request.
-func setProxyHeaders(req *http.Request) {
+// setProxyHeaders adds standard nginx-style proxy headers to the outgoing
+// request.  inReq is the original client request (used for real client IP
+// and TLS detection); outReq is the request being sent to the backend.
+func setProxyHeaders(outReq, inReq *http.Request) {
 	// Host → localhost (mimics proxy_set_header Host localhost).
-	req.Host = "localhost"
+	outReq.Host = "localhost"
 
 	// X-Real-IP → client address.
-	clientIP, _, err := net.SplitHostPort(req.RemoteAddr)
+	clientIP, _, err := net.SplitHostPort(inReq.RemoteAddr)
 	if err != nil {
-		clientIP = req.RemoteAddr
+		clientIP = inReq.RemoteAddr
 	}
-	req.Header.Set("X-Real-IP", clientIP)
+	outReq.Header.Set("X-Real-IP", clientIP)
 
 	// X-Forwarded-Proto → original scheme.
-	if req.TLS != nil {
-		req.Header.Set("X-Forwarded-Proto", "https")
+	if inReq.TLS != nil {
+		outReq.Header.Set("X-Forwarded-Proto", "https")
 	} else {
-		req.Header.Set("X-Forwarded-Proto", "http")
+		outReq.Header.Set("X-Forwarded-Proto", "http")
 	}
 	// X-Forwarded-For is already handled by httputil.ReverseProxy.
 }
