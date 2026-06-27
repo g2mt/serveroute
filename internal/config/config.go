@@ -229,9 +229,12 @@ func (st *serviceTemplater) apply(svc *ServiceConfig, hostName string) {
 	svc.AllowOrigin = r.Replace(svc.AllowOrigin)
 
 	// Apply template replacement to header key/value pairs.
-	for k, v := range svc.Headers {
-		delete(svc.Headers, k)
-		svc.Headers[r.Replace(k)] = r.Replace(v)
+	if svc.Headers != nil {
+		newHeaders := make(map[string]string, len(svc.Headers))
+		for k, v := range svc.Headers {
+			newHeaders[r.Replace(k)] = r.Replace(v)
+		}
+		svc.Headers = newHeaders
 	}
 }
 
