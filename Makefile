@@ -1,6 +1,6 @@
 .PHONY: build
 build:
-	go build -o ./bin/ ./...
+	go build -tags systemd -o ./bin/ ./...
 
 .PHONY: install_local
 install_local: build
