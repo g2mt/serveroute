@@ -1,127 +1,11 @@
-// Package systemd wraps libsystemd (sd-bus) for unit lifecycle operations.
-// All calls are serialized through a single goroutine that owns the bus connections.
+// Package systemd wraps systemctl for unit lifecycle operations.
 package systemd
-
-// EnsureSuffix appends ".service" to name if it does not already carry a known
-// systemd unit suffix (e.g. ".timer", ".socket", ".service", etc.).
-
-/*
-#cgo pkg-config: libsystemd
-#include <systemd/sd-bus.h>
-#include <stdlib.h>
-#include <string.h>
-
-static int do_start_unit(sd_bus *bus, const char *name) {
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	sd_bus_message *reply = NULL;
-	int r = sd_bus_call_method(bus,
-		"org.freedesktop.systemd1",
-		"/org/freedesktop/systemd1",
-		"org.freedesktop.systemd1.Manager",
-		"StartUnit",
-		&error,
-		&reply,
-		"ss", name, "replace");
-	if (r < 0) {
-		int e = r;
-		sd_bus_error_free(&error);
-		return e;
-	}
-	sd_bus_message_unref(reply);
-	sd_bus_error_free(&error);
-	return 0;
-}
-
-static int do_stop_unit(sd_bus *bus, const char *name) {
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	sd_bus_message *reply = NULL;
-	int r = sd_bus_call_method(bus,
-		"org.freedesktop.systemd1",
-		"/org/freedesktop/systemd1",
-		"org.freedesktop.systemd1.Manager",
-		"StopUnit",
-		&error,
-		&reply,
-		"ss", name, "replace");
-	if (r < 0) {
-		int e = r;
-		sd_bus_error_free(&error);
-		return e;
-	}
-	sd_bus_message_unref(reply);
-	sd_bus_error_free(&error);
-	return 0;
-}
-
-// do_get_state uses sd_bus_path_encode (libsystemd) to build a valid
-// D-Bus object path from the unit name, then fetches ActiveState.
-static int do_get_state(sd_bus *bus, const char *name, char **result) {
-	sd_bus_error error = SD_BUS_ERROR_NULL;
-	char *path = NULL;
-
-	int r = sd_bus_path_encode("/org/freedesktop/systemd1/unit", name, &path);
-	if (r < 0) return r;
-
-	r = sd_bus_get_property_string(bus,
-		"org.freedesktop.systemd1",
-		path,
-		"org.freedesktop.systemd1.Unit",
-		"ActiveState",
-		&error,
-		result);
-	free(path);
-	if (r < 0) {
-		sd_bus_error_free(&error);
-		return r;
-	}
-	sd_bus_error_free(&error);
-	return 0;
-}
-
-// strerror_r wrapper — returns a malloc'd string.
-static char *errstr(int errnum) {
-	char buf[256];
-	strerror_r(-errnum, buf, sizeof(buf));
-	return strdup(buf);
-}
-*/
-import "C"
 
 import (
 	"fmt"
-	"sync"
-	"unsafe"
+	"os/exec"
+	"strings"
 )
-
-type action int
-
-const (
-	actionStart action = iota
-	actionStop
-	actionState
-)
-
-// request represents a single systemd operation.
-type request struct {
-	action   action
-	name     string // unit name
-	useUser  bool   // use user bus instead of system bus
-	respChan chan response
-}
-
-type response struct {
-	state string
-	err   error
-}
-
-// Manager serializes access to sd-bus connections.
-type Manager struct {
-	reqs      chan request
-	systemBus *C.sd_bus
-	userBus   *C.sd_bus
-	done      chan struct{}
-	once      sync.Once
-}
 
 // knownSuffixes lists all valid systemd unit file suffixes.
 var knownSuffixes = []string{
@@ -130,7 +14,7 @@ var knownSuffixes = []string{
 	"swap", "network", "link", "netdev",
 }
 
-// ensureSuffix appends ".service" to name if it does not already carry a known
+// EnsureSuffix appends ".service" to name if it does not already carry a known
 // systemd unit suffix (e.g. ".timer", ".socket", ".service", etc.).
 func EnsureSuffix(name string) string {
 	for _, s := range knownSuffixes {
@@ -142,149 +26,57 @@ func EnsureSuffix(name string) string {
 	return name + ".service"
 }
 
-// NewManager starts the background goroutine that owns the bus connections.
+// Manager manages systemd units via the systemctl CLI.
+type Manager struct{}
+
+// NewManager creates a new Manager.
 func NewManager() *Manager {
-	m := &Manager{
-		reqs: make(chan request),
-		done: make(chan struct{}),
-	}
-	go m.loop()
-	return m
+	return &Manager{}
 }
 
-func (m *Manager) do(a action, name string, useUser bool) error {
-	respChan := make(chan response, 1)
-	m.reqs <- request{
-		action:   a,
-		name:     name,
-		useUser:  useUser,
-		respChan: respChan,
-	}
-	resp := <-respChan
-	return resp.err
-}
-
-func (m *Manager) getBus(useUser bool) (*C.sd_bus, error) {
-	if useUser {
-		if m.userBus == nil {
-			var bus *C.sd_bus
-			r := C.sd_bus_default_user(&bus)
-			if r < 0 {
-				errStr := C.errstr(r)
-				defer C.free(unsafe.Pointer(errStr))
-				return nil, fmt.Errorf("sd_bus_default_user: %s", C.GoString(errStr))
-			}
-			m.userBus = bus
-		}
-		return m.userBus, nil
-	}
-	if m.systemBus == nil {
-		var bus *C.sd_bus
-		r := C.sd_bus_open_system(&bus)
-		if r < 0 {
-			errStr := C.errstr(r)
-			defer C.free(unsafe.Pointer(errStr))
-			return nil, fmt.Errorf("sd_bus_open_system: %s", C.GoString(errStr))
-		}
-		m.systemBus = bus
-	}
-	return m.systemBus, nil
-}
-
-// Start starts a systemd unit.
+// Start starts a systemd unit and waits for the start job to finish.
 func (m *Manager) Start(name string, useUser bool) error {
-	return m.do(actionStart, name, useUser)
+	args := m.buildArgs(useUser, "start", name)
+	_, err := systemctl(args...)
+	return err
 }
 
 // Stop stops a systemd unit.
 func (m *Manager) Stop(name string, useUser bool) error {
-	return m.do(actionStop, name, useUser)
+	args := m.buildArgs(useUser, "stop", name)
+	_, err := systemctl(args...)
+	return err
 }
 
 // State returns the ActiveState of a systemd unit.
 func (m *Manager) State(name string, useUser bool) (string, error) {
-	respChan := make(chan response, 1)
-	m.reqs <- request{
-		action:   actionState,
-		name:     name,
-		useUser:  useUser,
-		respChan: respChan,
-	}
-	resp := <-respChan
-	return resp.state, resp.err
-}
-
-// Shutdown closes the bus connections and stops the goroutine.
-func (m *Manager) Shutdown() {
-	m.once.Do(func() {
-		close(m.done)
-	})
-}
-
-func (m *Manager) loop() {
-	for {
-		select {
-		case <-m.done:
-			m.cleanup()
-			return
-		case req := <-m.reqs:
-			state, err := m.handle(req)
-			req.respChan <- response{state: state, err: err}
-		}
-	}
-}
-
-func (m *Manager) handle(req request) (string, error) {
-	bus, err := m.getBus(req.useUser)
+	args := m.buildArgs(useUser, "show", "-p", "ActiveState", "--value", name)
+	out, err := systemctl(args...)
 	if err != nil {
 		return "", err
 	}
-
-	cName := C.CString(req.name)
-	defer C.free(unsafe.Pointer(cName))
-
-	switch req.action {
-	case actionStart:
-		r := C.do_start_unit(bus, cName)
-		if r < 0 {
-			errStr := C.errstr(r)
-			defer C.free(unsafe.Pointer(errStr))
-			return "", fmt.Errorf("StartUnit(%s): %s", req.name, C.GoString(errStr))
-		}
-		return "", nil
-
-	case actionStop:
-		r := C.do_stop_unit(bus, cName)
-		if r < 0 {
-			errStr := C.errstr(r)
-			defer C.free(unsafe.Pointer(errStr))
-			return "", fmt.Errorf("StopUnit(%s): %s", req.name, C.GoString(errStr))
-		}
-		return "", nil
-
-	case actionState:
-		var cResult *C.char
-		r := C.do_get_state(bus, cName, &cResult)
-		if cResult != nil {
-			defer C.free(unsafe.Pointer(cResult))
-		}
-		if r < 0 {
-			return "", fmt.Errorf("ActiveState(%s): error %d", req.name, int(r))
-		}
-		return C.GoString(cResult), nil
-
-	default:
-		return "", fmt.Errorf("unknown action: %d", req.action)
-	}
+	return out, nil
 }
 
-func (m *Manager) cleanup() {
-	if m.systemBus != nil {
-		C.sd_bus_unref(m.systemBus)
-		m.systemBus = nil
+// Shutdown is a no-op for the systemctl-based manager.
+func (m *Manager) Shutdown() {}
+
+func (m *Manager) buildArgs(useUser bool, args ...string) []string {
+	if useUser {
+		return append([]string{"--user"}, args...)
 	}
-	if m.userBus != nil {
-		C.sd_bus_unref(m.userBus)
-		m.userBus = nil
+	return args
+}
+
+func systemctl(args ...string) (string, error) {
+	cmd := exec.Command("systemctl", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("systemctl %s: %s", strings.Join(args, " "),
+				strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("systemctl %s: %w", strings.Join(args, " "), err)
 	}
+	return strings.TrimSpace(string(out)), nil
 }

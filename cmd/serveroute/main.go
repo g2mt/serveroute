@@ -321,6 +321,12 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 				return
 			}
+			// Wait for the unit to become active before proxying.
+			if !h.waitForActive(svc.Unit, *svc.User, 30*time.Second) {
+				log.Printf("start %s: timed out waiting for active state", svc.Unit)
+				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
+				return
+			}
 		}
 
 		// Update last-seen timestamp and reverse proxy.
@@ -364,6 +370,27 @@ func (h *handler) idleReaper() {
 						h.platformMgr.Stop(ss.cfg.Unit, *ss.cfg.User)
 					}
 				}
+			}
+		}
+	}
+}
+
+// waitForActive polls h.platformMgr.State until the unit is "active" or
+// the timeout expires.
+func (h *handler) waitForActive(unit string, useUser bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		state, err := h.platformMgr.State(unit, useUser)
+		if err == nil && state == "active" {
+			return true
+		}
+		select {
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return false
 			}
 		}
 	}
