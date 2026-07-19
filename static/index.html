@@ -110,7 +110,7 @@
           linkHtml = `<span style="color:#9ca3af;font-size:0.82rem;">—</span>`;
         }
 
-        const serviceUrl = `http://${name}.${window.location.hostname}`;
+        const serviceUrl = `${window.location.protocol}//${name}.${window.location.hostname}`;
         html += `<tr>
           <td class="service-name"><a href="${escHtml(serviceUrl)}" target="_blank" rel="noopener">${escHtml(name)}</a></td>
           <td>
