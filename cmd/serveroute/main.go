@@ -142,7 +142,6 @@ func (h *handler) buildStates(compiled *config.Compiled) map[string]map[string]*
 		for sub, svc := range svcs {
 			if svc.Unit != "" {
 				ss := &serviceState{cfg: svc}
-				ss.lastSeen.Store(time.Now().Unix())
 				if svc.ForwardsTo != "" {
 					target, err := url.Parse(svc.ForwardsTo)
 					if err != nil {
@@ -321,12 +320,6 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 				return
 			}
-			// Wait for the unit to become active before proxying.
-			if !h.waitForActive(svc.Unit, *svc.User, 30*time.Second) {
-				log.Printf("start %s: timed out waiting for active state", svc.Unit)
-				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
-				return
-			}
 		}
 
 		// Update last-seen timestamp and reverse proxy.
@@ -335,9 +328,17 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 			return
 		}
+		lastSeen := ss.lastSeen.Load()
+		if lastSeen == 0 {
+			// Wait for the proxy target to become reachable.
+			if !h.waitForActive(svc.ForwardsTo, 30*time.Second) {
+				log.Printf("start %s: timed out waiting for active state", svc.Unit)
+				http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
+				return
+			}
+		}
 		ss.lastSeen.Store(time.Now().Unix())
 		ss.proxy.ServeHTTP(w, r)
-
 	default:
 		http.Error(w, "404 Not Found", http.StatusNotFound)
 	}
@@ -360,7 +361,7 @@ func (h *handler) idleReaper() {
 					continue
 				}
 				lastSeen := ss.lastSeen.Load()
-				if now-lastSeen >= int64(stopsAfter.Seconds()) {
+				if lastSeen > 0 && now-lastSeen >= int64(stopsAfter.Seconds()) {
 					state, err := h.platformMgr.State(ss.cfg.Unit, *ss.cfg.User)
 					if err != nil {
 						continue
@@ -375,17 +376,23 @@ func (h *handler) idleReaper() {
 	}
 }
 
-// waitForActive polls h.platformMgr.State until the unit is "active" or
-// the timeout expires.
-func (h *handler) waitForActive(unit string, useUser bool, timeout time.Duration) bool {
+// waitForActive sends HTTP HEAD requests to target+/ until 200 OK or the
+// timeout expires. This verifies the proxy target is actually reachable
+// rather than relying solely on the systemd unit state.
+func (h *handler) waitForActive(target string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+
 	for {
-		state, err := h.platformMgr.State(unit, useUser)
-		if err == nil && state == "active" {
-			return true
+		resp, err := client.Head(target + "/")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
 		}
 		select {
 		case <-ticker.C:
