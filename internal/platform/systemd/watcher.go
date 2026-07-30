@@ -276,9 +276,12 @@ func (w *Watcher) Subscribe() (<-chan Event, func()) {
 	w.subsMu.Unlock()
 	return ch, func() {
 		w.subsMu.Lock()
-		delete(w.subscribers, ch)
+		_, ok := w.subscribers[ch]
+		if ok {
+			delete(w.subscribers, ch)
+			close(ch)
+		}
 		w.subsMu.Unlock()
-		close(ch)
 	}
 }
 
