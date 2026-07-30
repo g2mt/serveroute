@@ -369,6 +369,7 @@ func (h *handler) idleReaper() {
 					if state == "active" || state == "activating" {
 						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Unit, now-lastSeen)
 						h.platformMgr.Stop(ss.cfg.Unit, *ss.cfg.User)
+						ss.lastSeen.Store(0)
 					}
 				}
 			}
