@@ -78,6 +78,29 @@ func main() {
 	// Start idle reaper.
 	go handler.idleReaper()
 
+	// Reset lastSeen when a service becomes inactive (manual stop or otherwise).
+	unitIndex := make(map[string][2]string)
+	for host, svcMap := range states {
+		for sub, ss := range svcMap {
+			unitIndex[ss.cfg.Unit] = [2]string{host, sub}
+		}
+	}
+	go func() {
+		ch, cancel := watcher.Subscribe()
+		defer cancel()
+		for evt := range ch {
+			if !evt.Active {
+				if keys, ok := unitIndex[evt.Service]; ok {
+					if svcMap, ok := states[keys[0]]; ok {
+						if ss, ok := svcMap[keys[1]]; ok {
+							ss.lastSeen.Store(0)
+						}
+					}
+				}
+			}
+		}
+	}()
+
 	// Set up HTTP server.
 	httpServer := &http.Server{
 		Addr:    cfg.Listen.HTTP,
@@ -369,7 +392,6 @@ func (h *handler) idleReaper() {
 					if state == "active" || state == "activating" {
 						log.Printf("idle reaper: stopping %s (last seen %ds ago)", ss.cfg.Unit, now-lastSeen)
 						h.platformMgr.Stop(ss.cfg.Unit, *ss.cfg.User)
-						ss.lastSeen.Store(0)
 					}
 				}
 			}
