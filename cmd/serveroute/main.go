@@ -335,6 +335,18 @@ func (h *handler) handleLocal(w http.ResponseWriter, r *http.Request, host, subd
 	case svc.API:
 		h.serveAPI(w, r, host)
 
+	case svc.RedirectsTo != "":
+		target, err := url.Parse(svc.RedirectsTo)
+		if err != nil {
+			http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
+			return
+		}
+		// Build redirect URL preserving the original path and query string.
+		redirectURL := *r.URL
+		redirectURL.Scheme = target.Scheme
+		redirectURL.Host = target.Host
+		http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+
 	case svc.Unit != "":
 		// Ensure platform unit is active.
 		state, err := h.platformMgr.State(svc.Unit, *svc.User)

@@ -57,6 +57,8 @@ type ServiceConfig struct {
 	StopsAfter int `yaml:"stops_after"`
 	// ForwardsTo is the URL to reverse-proxy requests to.
 	ForwardsTo string `yaml:"forwards_to"`
+	// RedirectsTo is the URL to redirect the browser to (HTTP 302).
+	RedirectsTo string `yaml:"redirects_to"`
 	// AllowOrigin sets the Access-Control-Allow-Origin header on responses.
 	AllowOrigin string `yaml:"allow_origin"`
 	// Headers is a map of additional HTTP headers to set on proxied requests.
@@ -228,6 +230,7 @@ func (st *serviceTemplater) apply(svc *ServiceConfig, hostName string) {
 	svc.ServeFiles = r.Replace(svc.ServeFiles)
 	svc.Unit = r.Replace(svc.Unit)
 	svc.ForwardsTo = r.Replace(svc.ForwardsTo)
+	svc.RedirectsTo = r.Replace(svc.RedirectsTo)
 	svc.AllowOrigin = r.Replace(svc.AllowOrigin)
 
 	// Apply template replacement to header key/value pairs.
