@@ -61,6 +61,8 @@ type ServiceConfig struct {
 	AllowOrigin string `yaml:"allow_origin"`
 	// Headers is a map of additional HTTP headers to set on proxied requests.
 	Headers map[string]string `yaml:"headers"`
+	// ClientHeaders is a map of HTTP headers to set on responses before sending to the client.
+	ClientHeaders map[string]string `yaml:"client_headers"`
 }
 
 // Compiled holds the validated config and pre-computed lookups.
@@ -235,6 +237,15 @@ func (st *serviceTemplater) apply(svc *ServiceConfig, hostName string) {
 			newHeaders[r.Replace(k)] = r.Replace(v)
 		}
 		svc.Headers = newHeaders
+	}
+
+	// Apply template replacement to client header key/value pairs.
+	if svc.ClientHeaders != nil {
+		newHeaders := make(map[string]string, len(svc.ClientHeaders))
+		for k, v := range svc.ClientHeaders {
+			newHeaders[r.Replace(k)] = r.Replace(v)
+		}
+		svc.ClientHeaders = newHeaders
 	}
 }
 

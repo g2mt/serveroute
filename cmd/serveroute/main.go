@@ -178,6 +178,12 @@ func (h *handler) buildStates(compiled *config.Compiled) map[string]map[string]*
 								pr.Out.URL.Host = target.Host
 								h.setProxyHeaders(pr, svc.Headers)
 							},
+							ModifyResponse: func(resp *http.Response) error {
+								for key, value := range svc.ClientHeaders {
+									resp.Header.Set(key, value)
+								}
+								return nil
+							},
 						}
 					}
 				}
